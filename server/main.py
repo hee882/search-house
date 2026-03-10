@@ -14,7 +14,7 @@ import sqlite3
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler("server.log", encoding="utf-8")]
+    handlers=[logging.StreamHandler(), logging.FileHandler(os.path.join(os.path.dirname(__file__), "server.log"), encoding="utf-8")]
 )
 logger = logging.getLogger(__name__)
 
