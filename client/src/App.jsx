@@ -69,21 +69,6 @@ function StationSearch({ value, onChange, placeholder, stations, icon: Icon, col
     setSelectedIndex(-1);
   };
 
-  const handleKeyDown = (e) => {
-    if (!isOpen || filteredStations.length === 0) return;
-    if (e.key === "ArrowDown") {
-      setSelectedIndex(prev => (prev + 1) % filteredStations.length);
-      e.preventDefault();
-    } else if (e.key === "ArrowUp") {
-      setSelectedIndex(prev => (prev - 1 + filteredStations.length) % filteredStations.length);
-      e.preventDefault();
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const idxToSelect = selectedIndex >= 0 ? selectedIndex : 0;
-      handleSelect(filteredStations[idxToSelect]);
-    }
-  };
-
   return (
     <div className="relative group w-full" ref={dropdownRef}>
       <Icon className={`absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-300 group-focus-within:${colorClass} transition-colors`} />
@@ -91,13 +76,12 @@ function StationSearch({ value, onChange, placeholder, stations, icon: Icon, col
         type="text" value={keyword}
         onChange={(e) => { setKeyword(e.target.value); setIsOpen(true); }}
         onFocus={() => setIsOpen(true)}
-        onKeyDown={handleKeyDown}
         className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl text-[15px] font-bold focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-gray-300 shadow-inner"
         placeholder={placeholder}
       />
       {isOpen && filteredStations.length > 0 && (
-        <div className="absolute bottom-full md:bottom-auto md:top-full left-0 w-full mb-2 md:mt-2 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 z-[2000] overflow-hidden max-h-60 overflow-y-auto custom-scrollbar">
-          <div className="px-4 py-2 bg-gray-50/50 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 text-center sticky top-0 backdrop-blur-md">
+        <div className="absolute bottom-full md:bottom-auto md:top-full left-0 w-full mb-2 md:mt-2 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 z-[2000] overflow-hidden">
+          <div className="px-4 py-2 bg-gray-50/50 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 text-center">
             {!keyword ? '주요 거점 추천' : '검색 결과'}
           </div>
           {filteredStations.map((s, i) => (
@@ -140,13 +124,8 @@ function App() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://search-house.onrender.com';
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/stations`)
-      .then(res => res.json())
-      .then(data => {
-        if(Array.isArray(data)) setStationList(data);
-      })
-      .catch(console.error);
-  }, [API_BASE_URL]);
+    fetch(`${API_BASE_URL}/api/stations`).then(res => res.json()).then(setStationList).catch(console.error);
+  }, []);
 
   const drawCommutePaths = useCallback((spot, workplaceLocs, mode) => {
     if (!map) return;
@@ -221,25 +200,18 @@ function App() {
     window.dispatchSpotClick = (index) => { if (results && results[index]) handleSpotClick(results[index], index); };
   }, [results, handleSpotClick]);
 
-  const calculateHourly = (salaryManWon) => Math.round((salaryManWon * 10000) / 12 / 209);
-
   const handleSearch = async () => {
-    if (!inputs.user1.workplace || !inputs.user1.workplace.lat) { alert("나의 직장 위치를 드롭다운 목록에서 정확히 선택해 주세요."); return; }
-    if (mode === 'couple' && (!inputs.user2.workplace || !inputs.user2.workplace.lat)) { alert("배우자 직장 위치를 드롭다운 목록에서 정확히 선택해 주세요."); return; }
-    
+    if (!inputs.user1.workplace) { alert("나의 직장 위치를 선택해 주세요."); return; }
     setLoading(true);
     try {
       const loc1 = inputs.user1.workplace;
       const loc2 = mode === 'couple' ? inputs.user2.workplace : null;
       setWorkplaceLocs({ user1: loc1, user2: loc2 });
-      
       const payload = { mode, resident_type: residentType, user1: { workplace: loc1, salary: inputs.user1.salary, transport: inputs.user1.transport }, user2: loc2 ? { workplace: loc2, salary: inputs.user2.salary, transport: inputs.user2.transport } : null };
       const response = await fetch(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await response.json();
-      
       setResults(data.results);
       setIsMinimized(true);
-      
       if (data.results?.length > 0) {
         const allPts = [...data.results, loc1];
         if (loc2) allPts.push(loc2);
@@ -248,12 +220,7 @@ function App() {
         setExpandedComplexIdx(0);
         setTimeout(() => { drawCommutePaths(data.results[0], { user1: loc1, user2: loc2 }, mode); }, 600);
       }
-    } catch (e) { 
-      console.error(e);
-      alert("분석 중 오류가 발생했습니다. 백엔드 서버 상태를 확인해 주세요."); 
-    } finally { 
-      setLoading(false); 
-    }
+    } catch (e) { alert("분석 중 오류가 발생했습니다."); } finally { setLoading(false); }
   };
 
   return (
@@ -271,7 +238,7 @@ function App() {
       {/* Sidebar Container */}
       <div className={`absolute z-[1000] bg-white transition-all duration-500 ease-in-out flex flex-col 
         ${isSidebarOpen 
-          ? 'inset-x-4 bottom-4 h-[55vh] md:inset-y-0 md:left-0 md:right-auto md:w-[420px] rounded-[2.5rem] md:rounded-none shadow-[0_20px_60px_rgba(0,0,0,0.12)] md:shadow-[10px_0_40px_rgba(0,0,0,0.04)] border-r border-gray-100' 
+          ? 'inset-x-4 bottom-4 h-[60vh] md:inset-y-0 md:left-0 md:right-auto md:w-[420px] rounded-[2.5rem] md:rounded-none shadow-[0_20px_60px_rgba(0,0,0,0.12)] md:shadow-[10px_0_40px_rgba(0,0,0,0.04)] border-r border-gray-100' 
           : 'inset-x-4 bottom-[-100%] md:inset-y-0 md:left-[-420px] md:w-[420px]'
         }
       `}>
@@ -283,8 +250,8 @@ function App() {
 
         <div className="flex flex-col h-full overflow-hidden">
           {/* Header & Form */}
-          <div className="px-6 md:px-8 py-2 md:pt-10 shrink-0 border-b border-gray-50">
-            <div className="flex items-center justify-between mb-4 md:mb-8">
+          <div className="p-6 md:p-8 pt-2 md:pt-10 shrink-0 border-b border-gray-50">
+            <div className="flex items-center justify-between mb-6 md:mb-8">
               <div className="flex items-center space-x-3 cursor-pointer" onClick={() => window.location.reload()}>
                 <img src="logo.svg" alt="Logo" className="w-10 h-10 md:w-12 md:h-12 shrink-0 object-contain" />
                 <span className="text-xl md:text-2xl font-black tracking-[-0.08em] uppercase text-gray-900 leading-none">Search House</span>
@@ -295,7 +262,7 @@ function App() {
             </div>
 
             {isMinimized ? (
-              <div className="flex items-center justify-between bg-gray-900 p-4 rounded-2xl animate-in slide-in-from-bottom-2 duration-500 shadow-xl mb-4">
+              <div className="flex items-center justify-between bg-gray-900 p-4 rounded-2xl animate-in slide-in-from-bottom-2 duration-500 shadow-xl">
                 <div className="flex items-center space-x-3">
                   <div className="flex -space-x-2">
                     <div className="w-8 h-8 rounded-full bg-blue-600 border-2 border-gray-900 flex items-center justify-center text-white text-[9px] font-black shadow-lg">나</div>
@@ -309,8 +276,8 @@ function App() {
                 <button onClick={() => {setIsMinimized(false); setIsSidebarOpen(true);}} className="p-2 text-gray-400 hover:text-white"><Edit3 size={16} /></button>
               </div>
             ) : (
-              <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500 pb-4">
-                <div className="bg-blue-50/50 p-4 rounded-3xl border border-blue-100/50 mb-1 hidden md:block">
+              <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
+                <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50 mb-1">
                   <div className="flex items-center space-x-2 text-blue-600 mb-1">
                     <ShieldCheck size={16} />
                     <span className="text-[10px] font-black uppercase tracking-widest leading-none">Survival Engine</span>
@@ -369,8 +336,8 @@ function App() {
             )}
           </div>
 
-          {/* Scrollable Results Area */}
-          <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4 md:py-6 custom-scrollbar space-y-6">
+          {/* Results Area */}
+          <div className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar space-y-6">
             {results ? (
               <>
                 <div className="flex items-center justify-between px-2">
@@ -382,43 +349,43 @@ function App() {
                     const isExpanded = expandedSpotIndex === i;
                     return (
                       <div key={i} className={`transition-all rounded-[2rem] border overflow-hidden ${isExpanded ? 'bg-white border-blue-200 shadow-2xl ring-1 ring-blue-100 scale-[1.02]' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
-                        <button onClick={() => handleSpotClick(spot, i)} className="w-full p-5 md:p-6 text-left flex justify-between items-center">
-                          <div className="flex items-center space-x-3 md:space-x-4">
+                        <button onClick={() => handleSpotClick(spot, i)} className="w-full p-6 text-left flex justify-between items-center">
+                          <div className="flex items-center space-x-4">
                             <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-sm font-black ${i === 0 ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-100 text-gray-400'}`}>{i === 0 ? <Trophy size={18} /> : i + 1}</div>
                             <div>
                               <div className="text-[10px] font-black text-blue-500 uppercase tracking-tighter mb-0.5">{spot.name} 인근</div>
-                              <h6 className="text-[16px] md:text-[17px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[140px] md:max-w-none">{spot.complexes[0]?.name}</h6>
+                              <h6 className="text-[17px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[140px] md:max-w-none">{spot.complexes[0]?.name}</h6>
                             </div>
                           </div>
-                          <div className="text-right ml-2 shrink-0">
+                          <div className="text-right ml-2">
                             <div className="text-[9px] font-black text-gray-300 uppercase mb-0.5 whitespace-nowrap">총 손실 비용</div>
-                            <div className="text-[16px] md:text-[18px] font-black text-gray-900 tracking-tighter leading-none whitespace-nowrap">월 {spot.total_cost}만</div>
+                            <div className="text-[18px] font-black text-gray-900 tracking-tighter leading-none whitespace-nowrap">월 {spot.total_cost}만</div>
                           </div>
                         </button>
                         {isExpanded && (
-                          <div className="px-5 md:px-6 pb-6 animate-in slide-in-from-top-4 duration-500">
+                          <div className="px-6 pb-8 animate-in slide-in-from-top-4 duration-500">
                             <div className="h-px bg-gray-100 mb-6" />
-                            <div className="space-y-3 mb-6">
+                            <div className="space-y-3 mb-8">
                               {spot.complexes.map((apt, idx) => (
                                 <div key={idx} onClick={() => setExpandedComplexIdx(idx)} className={`p-4 rounded-2xl border transition-all cursor-pointer ${expandedComplexIdx === idx ? 'bg-blue-50 border-blue-200 shadow-sm' : 'bg-gray-50 border-transparent'}`}>
                                   <div className="flex justify-between items-center mb-1 gap-2">
                                     <div className="flex items-center space-x-2 overflow-hidden">
-                                      <span className="text-[13px] md:text-[14px] font-black text-gray-800 tracking-tight truncate">{apt.name}</span>
+                                      <span className="text-[14px] font-black text-gray-800 tracking-tight truncate">{apt.name}</span>
                                       <ExternalLink size={12} className="text-gray-300 shrink-0" />
                                     </div>
                                     <span className="text-[12px] font-black text-blue-600 shrink-0">{Math.round(apt.display_price_value/10000)}억{(apt.display_price_value%10000) > 0 ? ` ${apt.display_price_value%10000}만` : ''}</span>
                                   </div>
                                   {expandedComplexIdx === idx && (
                                     <div className="mt-4 grid grid-cols-2 gap-2 animate-in fade-in duration-300">
-                                      <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm text-center"><div className="text-[9px] font-black text-gray-400 uppercase mb-1">월 지출</div><div className="text-[13px] md:text-[14px] font-black text-gray-900">{apt.fixed_monthly_exp}만</div></div>
-                                      <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm text-center"><div className="text-[9px] font-black text-gray-400 uppercase mb-1 text-orange-500">에너지 비용</div><div className="text-[13px] md:text-[14px] font-black text-gray-900">{apt.hidden_life_cost}만</div></div>
+                                      <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm text-center"><div className="text-[9px] font-black text-gray-400 uppercase mb-1">월 지출</div><div className="text-[14px] font-black text-gray-900">{apt.fixed_monthly_exp}만</div></div>
+                                      <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm text-center"><div className="text-[9px] font-black text-gray-400 uppercase mb-1 text-orange-500">에너지 비용</div><div className="text-[14px] font-black text-gray-900">{apt.hidden_life_cost}만</div></div>
                                     </div>
                                   )}
                                 </div>
                               ))}
                             </div>
-                            <button onClick={() => window.open(`https://m.land.naver.com/search/result?query=${spot.complexes[expandedComplexIdx].dong} ${spot.complexes[expandedComplexIdx].name}`, '_blank')} className="w-full bg-gray-900 hover:bg-black text-white font-black py-4 rounded-[1.25rem] text-sm transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg">
-                              <ExternalLink size={16} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span>
+                            <button onClick={() => window.open(`https://m.land.naver.com/search/result?query=${spot.complexes[expandedComplexIdx].dong} ${spot.complexes[expandedComplexIdx].name}`, '_blank')} className="w-full bg-gray-900 hover:bg-black text-white font-black py-4 rounded-2xl text-sm transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg">
+                              <ExternalLink size={18} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span>
                             </button>
                           </div>
                         )}
@@ -426,14 +393,21 @@ function App() {
                     );
                   })}
                 </div>
+                <div className="mt-8 p-10 bg-gray-50/30 rounded-[3rem] border border-gray-100 text-center opacity-40 space-y-4">
+                  <div className="flex justify-center space-x-4 text-[10px] font-black uppercase">
+                    <button className="hover:text-blue-600 transition-colors">이용약관</button>
+                    <button className="hover:text-blue-600 transition-colors">개인정보처리방침</button>
+                  </div>
+                  <p className="text-[9px] font-medium leading-relaxed">수도권 샐러리맨의 워라밸을 응원합니다.<br/>© 2026 SEARCH HOUSE. All rights reserved.</p>
+                </div>
               </>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-8 md:py-12">
-                <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-6 shrink-0 animate-bounce duration-[2000ms]">
-                  <Coffee size={32} className="text-blue-500" />
+              <div className="h-full flex flex-col items-center justify-center text-center p-8 mt-2">
+                <div className="w-24 h-24 bg-blue-50 rounded-[3rem] flex items-center justify-center mb-6 animate-bounce">
+                  <Coffee size={40} className="text-blue-500" />
                 </div>
-                <h4 className="text-lg md:text-xl font-black text-gray-900 mb-2 tracking-tighter leading-tight">지옥철에서 버려지는<br/>당신의 에너지를 구출하세요</h4>
-                <p className="text-xs md:text-[13px] font-bold text-gray-400 tracking-tight leading-relaxed">단순 거리 기반이 아닌, 당신의 <br/><span className="text-gray-600">인생 시급과 워라밸 가치</span>를 최우선으로 계산합니다.</p>
+                <h4 className="text-lg font-black text-gray-900 mb-3 tracking-tighter leading-tight">지옥철에서 버려지는<br/>당신의 에너지를 구출하세요</h4>
+                <p className="text-[13px] font-bold text-gray-400 tracking-tight leading-relaxed">단순 거리 기반이 아닌, 당신의 <br/><span className="text-gray-600">인생 시급과 워라밸 가치</span>를 최우선으로 계산합니다.</p>
               </div>
             )}
           </div>
