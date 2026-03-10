@@ -27,6 +27,7 @@ origins = [
     "http://localhost:5173",      # 로컬 Vite 환경
     "http://127.0.0.1:5173",      # 로컬 Vite 환경 (IP)
     "https://hee882.github.io",   # 배포된 프론트엔드 환경
+    "https://hee882.github.io/search-house",
     "https://search-house.onrender.com"
 ]
 
