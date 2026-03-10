@@ -388,7 +388,15 @@ function App() {
                                 </div>
                               ))}
                             </div>
-                            <button onClick={() => window.open(`https://m.land.naver.com/search/result?query=${spot.complexes[expandedComplexIdx].dong} ${spot.complexes[expandedComplexIdx].name}`, '_blank')} className="w-full bg-gray-900 hover:bg-black text-white font-black py-4 rounded-2xl text-sm transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg">
+                            <button 
+                              onClick={() => {
+                                const complex = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0];
+                                if (complex) {
+                                  window.open(`https://m.land.naver.com/search/result?query=${complex.dong} ${complex.name}`, '_blank');
+                                }
+                              }} 
+                              className="w-full bg-gray-900 hover:bg-black text-white font-black py-4 rounded-2xl text-sm transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg"
+                            >
                               <ExternalLink size={18} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span>
                             </button>
                           </div>
