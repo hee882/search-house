@@ -280,9 +280,9 @@ function App() {
                 <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50 mb-1">
                   <div className="flex items-center space-x-2 text-blue-600 mb-1">
                     <ShieldCheck size={16} />
-                    <span className="text-[10px] font-black uppercase tracking-widest leading-none">Survival Engine</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest leading-none">Comprehensive Fatigue Model v1.0</span>
                   </div>
-                  <p className="text-[12px] font-bold text-gray-600 leading-tight">지옥철에서 워라밸 에너지를 구출합니다.</p>
+                  <p className="text-[12px] font-bold text-gray-600 leading-tight">다차원 데이터를 분석하여 최적의 거주지를 산출합니다.</p>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-2">
@@ -406,7 +406,7 @@ function App() {
                 <div className="w-24 h-24 bg-blue-50 rounded-[3rem] flex items-center justify-center mb-6 animate-bounce">
                   <Coffee size={40} className="text-blue-500" />
                 </div>
-                <h4 className="text-lg font-black text-gray-900 mb-3 tracking-tighter leading-tight">지옥철에서 버려지는<br/>당신의 에너지를 구출하세요</h4>
+                <h4 className="text-lg font-black text-gray-900 mb-3 tracking-tighter leading-tight">더 스마트한 주거지 탐색<br/>인생의 질을 높여보세요</h4>
                 <p className="text-[13px] font-bold text-gray-400 tracking-tight leading-relaxed">단순 거리 기반이 아닌, 당신의 <br/><span className="text-gray-600">인생 시급과 워라밸 가치</span>를 최우선으로 계산합니다.</p>
               </div>
             )}

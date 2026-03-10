@@ -21,13 +21,22 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# --- CORS (가장 호환성이 높고 에러가 없는 표준 설정) ---
+# --- CORS Configuration ---
+# GitHub Pages와 로컬 개발 환경 모두에서 안정적으로 작동하도록 설정
+origins = [
+    "http://localhost:5173",      # 로컬 Vite 환경
+    "http://127.0.0.1:5173",      # 로컬 Vite 환경 (IP)
+    "https://hee882.github.io",   # 배포된 프론트엔드 환경
+    "https://search-house.onrender.com"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # 모든 출처 허용
-    allow_credentials=False, # 인증정보 비허용 (CORS 에러 해결의 핵심)
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_origins=origins, 
+    allow_credentials=True, # 명시적인 origin 목록을 사용할 경우 credential 허용 가능
+    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # --- Models ---
