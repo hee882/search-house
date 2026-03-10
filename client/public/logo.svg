@@ -1,0 +1,12 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- House Base -->
+  <path d="M64 16L16 64H28V108C28 112.418 31.5817 116 36 116H92C96.4183 116 100 112.418 100 108V64H112L64 16Z" fill="#3B82F6"/>
+  <path d="M52 116V76H76V116" fill="white" opacity="0.3"/>
+  
+  <!-- Magnifying Glass -->
+  <circle cx="80" cy="80" r="28" fill="#F59E0B" stroke="white" stroke-width="8"/>
+  <rect x="96" y="96" width="12" height="32" rx="6" transform="rotate(-45 96 96)" fill="#F59E0B" stroke="white" stroke-width="6"/>
+  
+  <!-- Highlight -->
+  <circle cx="72" cy="72" r="6" fill="white" opacity="0.6"/>
+</svg>
