@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Search, MapPin, Coins, User, Heart, Car, Bus, Navigation, Loader2, ChevronRight, X, ChevronDown, ChevronUp, ExternalLink, Calculator, Clock, Wallet, Building2, Key, Edit3, Info, Scale, Sunrise, Sparkles, Trophy, Zap, Coffee, BatteryCharging, ShieldCheck, Menu, ChevronLeft } from 'lucide-react';
-import { useMap, addMarker, addOverlay, clearMarkers, geocodeAddress, drawPolyline, setBounds } from './lib/map';
+import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, Coffee, ShieldCheck, Map as MapIcon, List, Settings2 } from 'lucide-react';
+import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds } from './lib/map';
 
 // 지하철 호선별 공식 색상
 const LINE_COLORS = {
@@ -44,7 +44,7 @@ const getChosung = (str) => {
   return result;
 };
 
-function StationSearch({ value, onChange, placeholder, stations, icon: Icon, colorClass }) {
+function StationSearch({ value, onChange, placeholder, stations, icon: IconComponent, colorClass }) {
   const [keyword, setKeyword] = useState(value?.name || "");
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
@@ -71,7 +71,7 @@ function StationSearch({ value, onChange, placeholder, stations, icon: Icon, col
 
   return (
     <div className="relative group w-full" ref={dropdownRef}>
-      <Icon className={`absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-300 group-focus-within:${colorClass} transition-colors`} />
+      {IconComponent && <IconComponent className={`absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-300 group-focus-within:${colorClass} transition-colors`} />}
       <input
         type="text" value={keyword}
         onChange={(e) => { setKeyword(e.target.value); setIsOpen(true); }}
@@ -97,8 +97,8 @@ function StationSearch({ value, onChange, placeholder, stations, icon: Icon, col
 }
 
 function App() {
-  const [mapCenter, setMapCenter] = useState({ lat: 37.5665, lng: 126.9780 });
-  const [zoomLevel, setZoomLevel] = useState(15);
+  const [mapCenter] = useState({ lat: 37.5665, lng: 126.9780 });
+  const [zoomLevel] = useState(15);
   const [mode, setMode] = useState('single');
   const [residentType, setResidentType] = useState('buy');
   const [loading, setLoading] = useState(false);
@@ -125,7 +125,7 @@ function App() {
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/api/stations`).then(res => res.json()).then(setStationList).catch(console.error);
-  }, []);
+  }, [API_BASE_URL]);
 
   const drawCommutePaths = useCallback((spot, workplaceLocs, mode) => {
     if (!map) return;
@@ -220,7 +220,7 @@ function App() {
         setExpandedComplexIdx(0);
         setTimeout(() => { drawCommutePaths(data.results[0], { user1: loc1, user2: loc2 }, mode); }, 600);
       }
-    } catch (e) { alert("분석 중 오류가 발생했습니다."); } finally { setLoading(false); }
+    } catch (err) { console.error(err); alert("분석 중 오류가 발생했습니다."); } finally { setLoading(false); }
   };
 
   return (
@@ -254,7 +254,7 @@ function App() {
             <div className="flex items-center justify-between mb-6 md:mb-8">
               <div className="flex items-center space-x-3 cursor-pointer" onClick={() => window.location.reload()}>
                 <img src="logo.svg" alt="Logo" className="w-10 h-10 md:w-12 md:h-12 shrink-0 object-contain" />
-                <span className="text-xl md:text-2xl font-black tracking-[-0.08em] uppercase text-gray-900 leading-none">Search House</span>
+                <span className="text-xl md:text-2xl font-black tracking-[0.05em] uppercase text-gray-900 leading-none">Search House</span>
               </div>
               {!isMinimized && (
                 <button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-gray-900 md:hidden"><ChevronDown size={24} /></button>
