@@ -9,6 +9,7 @@ import json
 import os
 import logging
 import sqlite3
+from datetime import datetime
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -120,6 +121,118 @@ def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0, resi
     except Exception as e:
         logger.error(f"Complex calculation error: {e}")
         return []
+
+@app.get("/api/stats/transactions")
+async def get_transaction_stats(city_code: str, year: int = None, month: int = None):
+    if not os.path.exists(DB_PATH):
+        raise HTTPException(status_code=404, detail="DB not found")
+    try:
+        now = datetime.now()
+        year = year or now.year
+        month = month or now.month
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT COUNT(*) FROM transactions
+            WHERE city_code = ? AND deal_year = ? AND deal_month = ?
+            AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
+        ''', (city_code, year, month))
+        total = cursor.fetchone()[0]
+
+        cursor.execute('''
+            SELECT COUNT(*) FROM transactions
+            WHERE city_code = ? AND deal_year = ? AND deal_month = ?
+            AND is_new_high_price = 1
+        ''', (city_code, year, month))
+        new_high_count = cursor.fetchone()[0]
+
+        cursor.execute('''
+            SELECT COUNT(*) FROM transactions
+            WHERE city_code = ? AND deal_year = ? AND deal_month = ?
+            AND cancel_deal_day IS NOT NULL AND cancel_deal_day != ''
+        ''', (city_code, year, month))
+        cancel_count = cursor.fetchone()[0]
+
+        cursor.execute('''
+            SELECT deal_day, COUNT(*) as cnt,
+                   SUM(CASE WHEN is_new_high_price = 1 THEN 1 ELSE 0 END) as new_high
+            FROM transactions
+            WHERE city_code = ? AND deal_year = ? AND deal_month = ?
+            AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
+            GROUP BY deal_day ORDER BY deal_day
+        ''', (city_code, year, month))
+        daily = [{"day": r[0], "count": r[1], "new_high": r[2]} for r in cursor.fetchall()]
+
+        cursor.execute('''
+            SELECT buyer_type, COUNT(*) FROM transactions
+            WHERE city_code = ? AND deal_year = ? AND deal_month = ?
+            AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
+            AND buyer_type IS NOT NULL AND buyer_type != ''
+            GROUP BY buyer_type
+        ''', (city_code, year, month))
+        buyer_types = {r[0]: r[1] for r in cursor.fetchall()}
+
+        conn.close()
+
+        return {
+            "city_code": city_code,
+            "period": f"{year}-{month:02d}",
+            "summary": {
+                "total": total,
+                "new_high_count": new_high_count,
+                "cancel_count": cancel_count,
+                "buyer_types": buyer_types
+            },
+            "daily": daily
+        }
+    except Exception as e:
+        logger.error(f"Stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/stats/new-highs")
+async def get_new_highs(city_code: str, limit: int = 20):
+    if not os.path.exists(DB_PATH):
+        raise HTTPException(status_code=404, detail="DB not found")
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT t.apt_name, t.dong_name, t.exclusive_area, t.deal_amount,
+                   t.deal_year, t.deal_month, t.deal_day, t.floor, t.build_year,
+                   (SELECT MAX(t2.deal_amount) FROM transactions t2
+                    WHERE t2.apt_name = t.apt_name AND t2.dong_name = t.dong_name
+                    AND t2.exclusive_area = t.exclusive_area
+                    AND (t2.cancel_deal_day IS NULL OR t2.cancel_deal_day = '')
+                    AND t2.id < t.id) as prev_high
+            FROM transactions t
+            WHERE t.city_code = ? AND t.is_new_high_price = 1
+            AND (t.cancel_deal_day IS NULL OR t.cancel_deal_day = '')
+            ORDER BY t.deal_year DESC, t.deal_month DESC, t.deal_day DESC
+            LIMIT ?
+        ''', (city_code, limit))
+        rows = cursor.fetchall()
+        conn.close()
+
+        items = []
+        for r in rows:
+            prev = r[9] or 0
+            increase_rate = round((r[3] - prev) / prev * 100, 2) if prev > 0 else 0
+            items.append({
+                "apt_name": r[0], "dong_name": r[1],
+                "exclusive_area": r[2], "deal_amount": r[3],
+                "deal_date": f"{r[4]}-{r[5]:02d}-{r[6]:02d}",
+                "floor": r[7], "build_year": r[8],
+                "prev_high": prev,
+                "increase_rate": increase_rate
+            })
+        return {"city_code": city_code, "items": items}
+    except Exception as e:
+        logger.error(f"New highs error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/stations")
 async def get_stations():
