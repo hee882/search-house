@@ -82,14 +82,16 @@ def calculate_hidden_life_cost(salary, commute_minutes):
     elif commute_minutes >= 45: multiplier = 1.15
     return round((base_time_value * multiplier) / 10000)
 
-def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0, resident_type='buy'):
+def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0, resident_type='rent'):
     if not os.path.exists(DB_PATH): return []
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
+        
+        # 최근 전월세 거래 가져오기
         cursor.execute('''
-            SELECT apt_name, dong_name, AVG(deal_amount) as avg_price, COUNT(*) as cnt
-            FROM transactions
+            SELECT apt_name, dong_name, AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent, COUNT(*) as cnt
+            FROM rent_transactions
             WHERE city_code = ? AND deal_year >= 2024
             GROUP BY apt_name, dong_name
             ORDER BY cnt DESC LIMIT 3
@@ -99,17 +101,27 @@ def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0, resi
         
         complexes = []
         for row in rows:
-            avg_price = int(row[2])
-            if resident_type == 'buy':
-                monthly_housing_cost = round((avg_price * 0.04) / 12)
-                display_price_label = "평균 매매가"
-                display_price_value = avg_price
-            else:
-                estimated_jeonse = avg_price * 0.65
-                monthly_housing_cost = round((estimated_jeonse * 0.035) / 12)
-                display_price_label = "추정 전세가"
-                display_price_value = int(estimated_jeonse)
+            avg_deposit = int(row[2])
+            avg_rent = int(row[3])
             
+            rent_type = "전세" if avg_rent == 0 else "월세"
+            display_price_label = rent_type
+            
+            # 억 단위 포맷팅
+            if avg_deposit >= 10000:
+                eok = avg_deposit // 10000
+                man = avg_deposit % 10000
+                dep_str = f"{eok}억" + (f" {man}만" if man > 0 else "")
+            else:
+                dep_str = f"{avg_deposit}만"
+            
+            if rent_type == "월세":
+                display_price_value = f"{dep_str} / {avg_rent}만"
+            else:
+                display_price_value = f"{dep_str}"
+            
+            # 월 주거비용 (보증금 이자 4% 가정 + 월세)
+            monthly_housing_cost = round((avg_deposit * 0.04) / 12) + avg_rent
             base_transport_cost = 10 
             hidden_cost1 = calculate_hidden_life_cost(salary1, time1)
             hidden_cost2 = calculate_hidden_life_cost(salary2, time2) if salary2 > 0 else 0
@@ -119,6 +131,9 @@ def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0, resi
             
             complexes.append({
                 "name": row[0], "dong": row[1], 
+                "rent_type": rent_type,
+                "deposit": avg_deposit,
+                "monthly_rent": avg_rent,
                 "display_price_label": display_price_label,
                 "display_price_value": display_price_value,
                 "fixed_monthly_exp": fixed_monthly_exp,

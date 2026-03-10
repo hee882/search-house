@@ -36,9 +36,11 @@ jobs:
           if [ -n "${{ github.event.inputs.month }}" ]; then
             echo "Running collector for specified month: ${{ github.event.inputs.month }}"
             python server/collector.py --month "${{ github.event.inputs.month }}"
+            python server/collector_rent.py --month "${{ github.event.inputs.month }}"
           else
             echo "Running collector for current month."
             python server/collector.py
+            python server/collector_rent.py
           fi
 
       - name: Commit and Push Database Update

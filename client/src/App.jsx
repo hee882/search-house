@@ -290,7 +290,8 @@ function App() {
                     <button onClick={() => setMode('single')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${mode === 'single' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>1인</button>
                     <button onClick={() => setMode('couple')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${mode === 'couple' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}>부부</button>
                   </div>
-                  <div className="flex p-1 bg-gray-100 rounded-2xl">
+                  {/* 임대 모드 전용 (매매 숨김) */}
+                  <div className="flex p-1 bg-gray-100 rounded-2xl hidden">
                     <button onClick={() => setResidentType('buy')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${residentType === 'buy' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-400'}`}>매매</button>
                     <button onClick={() => setResidentType('rent')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${residentType === 'rent' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-400'}`}>임대</button>
                   </div>
@@ -373,7 +374,10 @@ function App() {
                                       <span className="text-[14px] font-black text-gray-800 tracking-tight truncate">{apt.name}</span>
                                       <ExternalLink size={12} className="text-gray-300 shrink-0" />
                                     </div>
-                                    <span className="text-[12px] font-black text-blue-600 shrink-0">{Math.round(apt.display_price_value/10000)}억{(apt.display_price_value%10000) > 0 ? ` ${apt.display_price_value%10000}만` : ''}</span>
+                                    <span className="text-[12px] font-black text-blue-600 shrink-0">
+                                      <span className="text-[9px] text-gray-400 font-bold mr-1">{apt.display_price_label}</span>
+                                      {apt.display_price_value}
+                                    </span>
                                   </div>
                                   {expandedComplexIdx === idx && (
                                     <div className="mt-4 grid grid-cols-2 gap-2 animate-in fade-in duration-300">

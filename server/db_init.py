@@ -38,6 +38,26 @@ def init_db():
         )
     ''')
     
+    # 전월세 실거래가 저장 테이블
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS rent_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            city_code TEXT,
+            dong_name TEXT,
+            apt_name TEXT,
+            exclusive_area REAL,
+            deal_year INTEGER,
+            deal_month INTEGER,
+            deal_day INTEGER,
+            deposit INTEGER,
+            monthly_rent INTEGER,
+            floor INTEGER,
+            build_year INTEGER,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(city_code, apt_name, dong_name, deal_year, deal_month, deal_day, deposit, monthly_rent, floor)
+        )
+    ''')
+    
     conn.commit()
     conn.close()
     print("Database initialized successfully.")
