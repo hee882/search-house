@@ -22,6 +22,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Claude Code (local state)
-.claude/settings.local.json
+# AI Agent metadata (Local only)
+CLAUDE.md
+GEMINI.md
+.claude/
+.gemini/
 .bkit/
+rewrite_history.py
