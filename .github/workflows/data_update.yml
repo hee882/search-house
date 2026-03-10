@@ -1,0 +1,48 @@
+name: SearchHouse-MOLIT-Data-Collector
+
+on:
+  schedule:
+    - cron: '0 19 * * *' # 매일 UTC 19:00 (한국 시간 오전 4시)
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 'Target month (YYYYMM format). Leave empty for current month.'
+        required: false
+
+jobs:
+  update-real-estate-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install requests xmltodict python-dotenv
+
+      - name: Run MOLIT Data collector
+        env:
+          DATA_API_KEY: ${{ secrets.DATA_API_KEY }}
+        run: |
+          if [ -n "${{ github.event.inputs.month }}" ]; then
+            echo "Running collector for specified month: ${{ github.event.inputs.month }}"
+            python server/collector.py --month "${{ github.event.inputs.month }}"
+          else
+            echo "Running collector for current month."
+            python server/collector.py
+          fi
+
+      - name: Commit and Push Database Update
+        run: |
+          git config --global user.name "SearchHouse-Bot"
+          git config --global user.email "bot@searchhouse.com"
+          git add server/data/search_house.db
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: [자동] 실거래가 데이터 업데이트 [skip ci]" && git push)
