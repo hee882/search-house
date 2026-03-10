@@ -153,7 +153,7 @@ function App() {
     
     if (!isAlreadyExpanded) {
       drawCommutePaths(spot, workplaceLocs, mode);
-      if (window.innerWidth < 768) setIsSidebarOpen(false); // 모바일은 결과 클릭 시 자동 축소
+      if (window.innerWidth < 768) setIsSidebarOpen(false);
     } else {
       pathsRef.current.forEach(p => p.setMap(null));
       pathsRef.current = [];
@@ -225,7 +225,7 @@ function App() {
 
   return (
     <div className="relative w-full h-screen overflow-hidden antialiased bg-gray-50 text-gray-900 font-sans">
-      {/* 1. Map Layer - ALWAYS FULL SCREEN */}
+      {/* 1. Map Layer */}
       <div ref={mapContainerRef} className="absolute inset-0 w-full h-full z-0 bg-gray-100 flex items-center justify-center">
         {!isReady && !mapError && (
           <div className="flex flex-col items-center space-y-4">
@@ -235,35 +235,10 @@ function App() {
         )}
       </div>
 
-      {/* Floating Header UI (Logo & Quick Summary) */}
-      <div className="absolute top-4 left-4 right-4 z-[1100] flex justify-between items-start pointer-events-none">
-        <div className="flex flex-col space-y-3 pointer-events-auto">
-          <div className="flex items-center space-x-3 bg-white/90 backdrop-blur-xl p-3 md:p-4 rounded-[1.5rem] shadow-[0_10px_30px_rgba(0,0,0,0.08)] border border-white/50 cursor-pointer" onClick={() => window.location.reload()}>
-            <img src="logo.svg" alt="Logo" className="w-8 h-8 md:w-10 md:h-10 shrink-0 object-contain" />
-            <span className="text-lg md:text-xl font-black tracking-[-0.08em] uppercase text-gray-900 leading-none">Search House</span>
-          </div>
-          {isMinimized && (
-            <div className="flex items-center space-x-2 bg-gray-900/90 backdrop-blur-xl p-3 rounded-[1.25rem] shadow-xl text-white border border-gray-800 animate-in slide-in-from-left-4 duration-500">
-              <div className="flex -space-x-2 mr-2">
-                <div className="w-7 h-7 rounded-full bg-blue-600 border-2 border-gray-900 flex items-center justify-center text-white text-[8px] font-black shadow-lg">나</div>
-                {mode === 'couple' && <div className="w-7 h-7 rounded-full bg-pink-500 border-2 border-gray-900 flex items-center justify-center text-white text-[8px] font-black shadow-lg">배</div>}
-              </div>
-              <div className="text-[11px] font-black tracking-tight truncate max-w-[150px]">{inputs.user1.workplace?.name}{mode === 'couple' ? ` & ${inputs.user2.workplace?.name}` : ''}</div>
-              <button onClick={() => {setIsMinimized(false); setIsSidebarOpen(true);}} className="p-1.5 hover:bg-white/10 rounded-full transition-colors"><Edit3 size={14} /></button>
-            </div>
-          )}
-        </div>
-        {!isSidebarOpen && (
-          <button onClick={() => setIsSidebarOpen(true)} className="pointer-events-auto w-12 h-12 bg-gray-900 text-white rounded-2xl shadow-2xl flex items-center justify-center animate-in fade-in scale-in duration-300">
-            <Menu size={24} />
-          </button>
-        )}
-      </div>
-
-      {/* Main Analysis Container (Sidebar on Desktop, Floating Sheet on Mobile) */}
+      {/* Sidebar Container */}
       <div className={`absolute z-[1000] bg-white transition-all duration-500 ease-in-out flex flex-col 
         ${isSidebarOpen 
-          ? 'inset-x-4 bottom-4 h-[60vh] md:inset-y-0 md:left-0 md:right-auto md:w-[420px] rounded-[2.5rem] md:rounded-none shadow-[0_20px_60px_rgba(0,0,0,0.12)] md:shadow-[10px_0_40px_rgba(0,0,0,0.04)]' 
+          ? 'inset-x-4 bottom-4 h-[60vh] md:inset-y-0 md:left-0 md:right-auto md:w-[420px] rounded-[2.5rem] md:rounded-none shadow-[0_20px_60px_rgba(0,0,0,0.12)] md:shadow-[10px_0_40px_rgba(0,0,0,0.04)] border-r border-gray-100' 
           : 'inset-x-4 bottom-[-100%] md:inset-y-0 md:left-[-420px] md:w-[420px]'
         }
       `}>
@@ -274,68 +249,94 @@ function App() {
         </div>
 
         <div className="flex flex-col h-full overflow-hidden">
-          {/* Analysis Form (Hidden when minimized) */}
-          {!isMinimized && (
-            <div className="p-6 md:p-8 pt-2 md:pt-10 shrink-0 space-y-4 border-b border-gray-50">
-              <div className="bg-blue-50/50 p-4 rounded-3xl border border-blue-100/50">
-                <div className="flex items-center space-x-2 text-blue-600 mb-1">
-                  <ShieldCheck size={16} />
-                  <span className="text-[10px] font-black uppercase tracking-widest leading-none">Salaryman Survival Engine</span>
-                </div>
-                <p className="text-[12px] font-bold text-gray-600 leading-tight">지옥철에서 당신의 워라밸 에너지를 구출합니다.</p>
+          {/* Header & Form */}
+          <div className="p-6 md:p-8 pt-2 md:pt-10 shrink-0 border-b border-gray-50">
+            <div className="flex items-center justify-between mb-6 md:mb-8">
+              <div className="flex items-center space-x-3 cursor-pointer" onClick={() => window.location.reload()}>
+                <img src="logo.svg" alt="Logo" className="w-10 h-10 md:w-12 md:h-12 shrink-0 object-contain" />
+                <span className="text-xl md:text-2xl font-black tracking-[-0.08em] uppercase text-gray-900 leading-none">Search House</span>
               </div>
-              
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex p-1 bg-gray-100 rounded-2xl">
-                  <button onClick={() => setMode('single')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${mode === 'single' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>1인</button>
-                  <button onClick={() => setMode('couple')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${mode === 'couple' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}>부부</button>
-                </div>
-                <div className="flex p-1 bg-gray-100 rounded-2xl">
-                  <button onClick={() => setResidentType('buy')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${residentType === 'buy' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-400'}`}>매매</button>
-                  <button onClick={() => setResidentType('rent')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${residentType === 'rent' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-400'}`}>임대</button>
-                </div>
-              </div>
+              {!isMinimized && (
+                <button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-gray-900 md:hidden"><ChevronDown size={24} /></button>
+              )}
+            </div>
 
-              <div className="space-y-3">
-                <StationSearch stations={stationList} value={inputs.user1.workplace} onChange={(val) => setInputs({...inputs, user1: {...inputs.user1, workplace: val}})} placeholder="나의 직장 위치 (역 검색)" icon={MapPin} colorClass="text-blue-500" />
-                <div className="flex gap-2">
-                  <div className="flex-1 relative group">
-                    <Coins className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-300" />
-                    <input type="number" value={inputs.user1.salary} onChange={(e) => setInputs({...inputs, user1: {...inputs.user1, salary: parseInt(e.target.value)||0}})} className="w-full pl-12 pr-10 py-3.5 bg-gray-50 border border-transparent rounded-2xl text-[14px] font-black outline-none focus:bg-white focus:border-blue-500" />
-                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">만원</span>
+            {isMinimized ? (
+              <div className="flex items-center justify-between bg-gray-900 p-4 rounded-2xl animate-in slide-in-from-bottom-2 duration-500 shadow-xl">
+                <div className="flex items-center space-x-3">
+                  <div className="flex -space-x-2">
+                    <div className="w-8 h-8 rounded-full bg-blue-600 border-2 border-gray-900 flex items-center justify-center text-white text-[9px] font-black shadow-lg">나</div>
+                    {mode === 'couple' && <div className="w-8 h-8 rounded-full bg-pink-500 border-2 border-gray-900 flex items-center justify-center text-white text-[9px] font-black shadow-lg">배</div>}
                   </div>
-                  <div className="flex bg-gray-100 rounded-2xl p-1 shrink-0">
-                    <button onClick={() => setInputs({...inputs, user1: {...inputs.user1, transport: 'public'}})} className={`px-3 md:px-4 rounded-xl ${inputs.user1.transport === 'public' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}><Bus size={18} /></button>
-                    <button onClick={() => setInputs({...inputs, user1: {...inputs.user1, transport: 'car'}})} className={`px-3 md:px-4 rounded-xl ${inputs.user1.transport === 'car' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}><Car size={18} /></button>
+                  <div>
+                    <div className="text-[13px] font-black text-white tracking-tight leading-none mb-1">{inputs.user1.workplace?.name}{mode === 'couple' ? ` & ${inputs.user2.workplace?.name}` : ''}</div>
+                    <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest">분석 완료 • 07:00 기준</div>
                   </div>
                 </div>
+                <button onClick={() => {setIsMinimized(false); setIsSidebarOpen(true);}} className="p-2 text-gray-400 hover:text-white"><Edit3 size={16} /></button>
               </div>
+            ) : (
+              <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
+                <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50 mb-1">
+                  <div className="flex items-center space-x-2 text-blue-600 mb-1">
+                    <ShieldCheck size={16} />
+                    <span className="text-[10px] font-black uppercase tracking-widest leading-none">Survival Engine</span>
+                  </div>
+                  <p className="text-[12px] font-bold text-gray-600 leading-tight">지옥철에서 워라밸 에너지를 구출합니다.</p>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex p-1 bg-gray-100 rounded-2xl">
+                    <button onClick={() => setMode('single')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${mode === 'single' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>1인</button>
+                    <button onClick={() => setMode('couple')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${mode === 'couple' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}>부부</button>
+                  </div>
+                  <div className="flex p-1 bg-gray-100 rounded-2xl">
+                    <button onClick={() => setResidentType('buy')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${residentType === 'buy' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-400'}`}>매매</button>
+                    <button onClick={() => setResidentType('rent')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${residentType === 'rent' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-400'}`}>임대</button>
+                  </div>
+                </div>
 
-              {mode === 'couple' && (
-                <div className="space-y-3 pt-3 border-t border-gray-50 animate-in fade-in slide-in-from-top-2">
-                  <StationSearch stations={stationList} value={inputs.user2.workplace} onChange={(val) => setInputs({...inputs, user2: {...inputs.user2, workplace: val}})} placeholder="배우자 직장 위치" icon={MapPin} colorClass="text-pink-500" />
+                <div className="space-y-3">
+                  <StationSearch stations={stationList} value={inputs.user1.workplace} onChange={(val) => setInputs({...inputs, user1: {...inputs.user1, workplace: val}})} placeholder="나의 직장 위치 (역 검색)" icon={MapPin} colorClass="text-blue-500" />
                   <div className="flex gap-2">
                     <div className="flex-1 relative group">
                       <Coins className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-300" />
-                      <input type="number" value={inputs.user2.salary} onChange={(e) => setInputs({...inputs, user2: {...inputs.user2, salary: parseInt(e.target.value)||0}})} className="w-full pl-12 pr-10 py-3.5 bg-gray-50 border border-transparent rounded-2xl text-[14px] font-black outline-none focus:bg-white focus:border-pink-500" />
+                      <input type="number" value={inputs.user1.salary} onChange={(e) => setInputs({...inputs, user1: {...inputs.user1, salary: parseInt(e.target.value)||0}})} className="w-full pl-12 pr-10 py-3.5 bg-gray-50 border border-transparent rounded-2xl text-[14px] font-black outline-none focus:bg-white focus:border-blue-500" />
                       <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">만원</span>
                     </div>
                     <div className="flex bg-gray-100 rounded-2xl p-1 shrink-0">
-                      <button onClick={() => setInputs({...inputs, user2: {...inputs.user2, transport: 'public'}})} className={`px-3 md:px-4 rounded-xl ${inputs.user2.transport === 'public' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}><Bus size={18} /></button>
-                      <button onClick={() => setInputs({...inputs, user2: {...inputs.user2, transport: 'car'}})} className={`px-3 md:px-4 rounded-xl ${inputs.user2.transport === 'car' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}><Car size={18} /></button>
+                      <button onClick={() => setInputs({...inputs, user1: {...inputs.user1, transport: 'public'}})} className={`px-3 md:px-4 rounded-xl ${inputs.user1.transport === 'public' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}><Bus size={18} /></button>
+                      <button onClick={() => setInputs({...inputs, user1: {...inputs.user1, transport: 'car'}})} className={`px-3 md:px-4 rounded-xl ${inputs.user1.transport === 'car' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}><Car size={18} /></button>
                     </div>
                   </div>
                 </div>
-              )}
 
-              <button onClick={handleSearch} disabled={loading || !isReady} className="w-full bg-gray-900 hover:bg-black text-white font-black py-4.5 rounded-2xl shadow-xl active:scale-[0.98] flex items-center justify-center space-x-2">
-                {loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} strokeWidth={3} />}
-                <span className="text-sm uppercase tracking-tighter">워라밸 구출하기</span>
-              </button>
-            </div>
-          )}
+                {mode === 'couple' && (
+                  <div className="space-y-3 pt-3 border-t border-gray-50 animate-in fade-in slide-in-from-top-2">
+                    <StationSearch stations={stationList} value={inputs.user2.workplace} onChange={(val) => setInputs({...inputs, user2: {...inputs.user2, workplace: val}})} placeholder="배우자 직장 위치" icon={MapPin} colorClass="text-pink-500" />
+                    <div className="flex gap-2">
+                      <div className="flex-1 relative group">
+                        <Coins className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-300" />
+                        <input type="number" value={inputs.user2.salary} onChange={(e) => setInputs({...inputs, user2: {...inputs.user2, salary: parseInt(e.target.value)||0}})} className="w-full pl-12 pr-10 py-3.5 bg-gray-50 border border-transparent rounded-2xl text-[14px] font-black outline-none focus:bg-white focus:border-pink-500" />
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">만원</span>
+                      </div>
+                      <div className="flex bg-gray-100 rounded-2xl p-1 shrink-0">
+                        <button onClick={() => setInputs({...inputs, user2: {...inputs.user2, transport: 'public'}})} className={`px-3 md:px-4 rounded-xl ${inputs.user2.transport === 'public' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}><Bus size={18} /></button>
+                        <button onClick={() => setInputs({...inputs, user2: {...inputs.user2, transport: 'car'}})} className={`px-3 md:px-4 rounded-xl ${inputs.user2.transport === 'car' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}><Car size={18} /></button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-          {/* Scrollable Results Area */}
+                <button onClick={handleSearch} disabled={loading || !isReady} className="w-full bg-gray-900 hover:bg-black text-white font-black py-4.5 rounded-2xl shadow-xl active:scale-[0.98] flex items-center justify-center space-x-2">
+                  {loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} strokeWidth={3} />}
+                  <span className="text-sm uppercase tracking-tighter">워라밸 구출하기</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Results Area */}
           <div className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar space-y-6">
             {results ? (
               <>
@@ -350,15 +351,15 @@ function App() {
                       <div key={i} className={`transition-all rounded-[2rem] border overflow-hidden ${isExpanded ? 'bg-white border-blue-200 shadow-2xl ring-1 ring-blue-100 scale-[1.02]' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
                         <button onClick={() => handleSpotClick(spot, i)} className="w-full p-6 text-left flex justify-between items-center">
                           <div className="flex items-center space-x-4">
-                            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-sm font-black ${i === 0 ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-gray-100 text-gray-400'}`}>{i === 0 ? <Trophy size={18} /> : i + 1}</div>
+                            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-sm font-black ${i === 0 ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-100 text-gray-400'}`}>{i === 0 ? <Trophy size={18} /> : i + 1}</div>
                             <div>
                               <div className="text-[10px] font-black text-blue-500 uppercase tracking-tighter mb-0.5">{spot.name} 인근</div>
                               <h6 className="text-[17px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[140px] md:max-w-none">{spot.complexes[0]?.name}</h6>
                             </div>
                           </div>
-                          <div className="text-right">
-                            <div className="text-[9px] font-black text-gray-300 uppercase mb-0.5">총 손실 비용</div>
-                            <div className="text-[18px] font-black text-gray-900 tracking-tighter leading-none">월 {spot.total_cost}만</div>
+                          <div className="text-right ml-2">
+                            <div className="text-[9px] font-black text-gray-300 uppercase mb-0.5 whitespace-nowrap">총 손실 비용</div>
+                            <div className="text-[18px] font-black text-gray-900 tracking-tighter leading-none whitespace-nowrap">월 {spot.total_cost}만</div>
                           </div>
                         </button>
                         {isExpanded && (
@@ -401,9 +402,9 @@ function App() {
                 </div>
               </>
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center p-8 mt-4">
-                <div className="w-20 h-20 bg-blue-50 rounded-[3rem] flex items-center justify-center mb-6 animate-bounce">
-                  <Coffee size={32} className="text-blue-500" />
+              <div className="h-full flex flex-col items-center justify-center text-center p-8 mt-2">
+                <div className="w-24 h-24 bg-blue-50 rounded-[3rem] flex items-center justify-center mb-6 animate-bounce">
+                  <Coffee size={40} className="text-blue-500" />
                 </div>
                 <h4 className="text-lg font-black text-gray-900 mb-3 tracking-tighter leading-tight">지옥철에서 버려지는<br/>당신의 에너지를 구출하세요</h4>
                 <p className="text-[13px] font-bold text-gray-400 tracking-tight leading-relaxed">단순 거리 기반이 아닌, 당신의 <br/><span className="text-gray-600">인생 시급과 워라밸 가치</span>를 최우선으로 계산합니다.</p>
@@ -412,6 +413,17 @@ function App() {
           </div>
         </div>
       </div>
+
+      {/* Floating Toggle Button for Mobile */}
+      {!isSidebarOpen && (
+        <button 
+          onClick={() => setIsSidebarOpen(true)}
+          className="md:hidden absolute bottom-8 left-1/2 -translate-x-1/2 z-[1100] px-6 py-3.5 bg-gray-900 text-white rounded-full shadow-2xl flex items-center space-x-2 font-black transition-all active:scale-95"
+        >
+          <Search size={18} />
+          <span>분석 도구 열기</span>
+        </button>
+      )}
     </div>
   );
 }

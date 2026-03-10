@@ -20,12 +20,12 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# --- CORS (가장 호환성 높은 설정으로 변경) ---
+# --- CORS (가장 호환성이 높고 에러가 없는 표준 설정) ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], # 모든 출처 허용
-    allow_credentials=False, # 와일드카드(*) 사용 시 False 필수
-    allow_methods=["*"],
+    allow_credentials=False, # 인증정보 비허용 (CORS 에러 해결의 핵심)
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -124,6 +124,8 @@ def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0, resi
 @app.get("/api/stations")
 async def get_stations():
     try:
+        if not os.path.exists(STATIONS_PATH):
+            return []
         with open(STATIONS_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
@@ -132,28 +134,32 @@ async def get_stations():
 
 @app.post("/api/optimize")
 async def optimize_location(request: OptimizeRequest):
-    with open(STATIONS_PATH, "r", encoding="utf-8") as f:
-        stations = json.load(f)
-    mid_lat = (request.user1.workplace.lat + (request.user2.workplace.lat if request.user2 else request.user1.workplace.lat)) / 2
-    mid_lng = (request.user1.workplace.lng + (request.user2.workplace.lng if request.user2 else request.user1.workplace.lng)) / 2
-    results = []
-    for spot in stations:
-        dist_from_mid = calculate_distance(spot['lat'], spot['lng'], mid_lat, mid_lng)
-        if dist_from_mid > 15: continue
-        time1 = estimate_commute_time(calculate_distance(spot['lat'], spot['lng'], request.user1.workplace.lat, request.user1.workplace.lng), request.user1.transport)
-        time2 = 0
-        if request.mode == 'couple' and request.user2:
-            time2 = estimate_commute_time(calculate_distance(spot['lat'], spot['lng'], request.user2.workplace.lat, request.user2.workplace.lng), request.user2.transport)
-        complexes = get_complexes_with_costs(spot.get('city_code', ''), request.user1.salary, time1, request.user2.salary if request.user2 else 0, time2, resident_type=request.resident_type)
-        if not complexes: continue
-        representative_cost = complexes[0]['total_opp_cost']
-        results.append({
-            "name": spot['name'], "lat": spot['lat'], "lng": spot['lng'],
-            "total_cost": representative_cost, "commute_time_1": time1, "commute_time_2": time2,
-            "complexes": complexes, "score": representative_cost
-        })
-    results.sort(key=lambda x: x['score'])
-    return {"results": results[:5]}
+    try:
+        with open(STATIONS_PATH, "r", encoding="utf-8") as f:
+            stations = json.load(f)
+        mid_lat = (request.user1.workplace.lat + (request.user2.workplace.lat if request.user2 else request.user1.workplace.lat)) / 2
+        mid_lng = (request.user1.workplace.lng + (request.user2.workplace.lng if request.user2 else request.user1.workplace.lng)) / 2
+        results = []
+        for spot in stations:
+            dist_from_mid = calculate_distance(spot['lat'], spot['lng'], mid_lat, mid_lng)
+            if dist_from_mid > 15: continue
+            time1 = estimate_commute_time(calculate_distance(spot['lat'], spot['lng'], request.user1.workplace.lat, request.user1.workplace.lng), request.user1.transport)
+            time2 = 0
+            if request.mode == 'couple' and request.user2:
+                time2 = estimate_commute_time(calculate_distance(spot['lat'], spot['lng'], request.user2.workplace.lat, request.user2.workplace.lng), request.user2.transport)
+            complexes = get_complexes_with_costs(spot.get('city_code', ''), request.user1.salary, time1, request.user2.salary if request.user2 else 0, time2, resident_type=request.resident_type)
+            if not complexes: continue
+            representative_cost = complexes[0]['total_opp_cost']
+            results.append({
+                "name": spot['name'], "lat": spot['lat'], "lng": spot['lng'],
+                "total_cost": representative_cost, "commute_time_1": time1, "commute_time_2": time2,
+                "complexes": complexes, "score": representative_cost
+            })
+        results.sort(key=lambda x: x['score'])
+        return {"results": results[:5]}
+    except Exception as e:
+        logger.error(f"Optimize error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Static Frontend Serving ---
 if os.path.exists(FRONTEND_DIST):
