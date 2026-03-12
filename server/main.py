@@ -57,6 +57,9 @@ class OptimizeRequest(BaseModel):
     mode: str = 'single'
     resident_type: str = 'buy'
     housing_ratio: float = 0.25
+    min_area: float = 40
+    max_area: float = 200
+    max_building_age: int = 0
 
 # --- Paths ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -116,21 +119,30 @@ def calculate_hidden_life_cost(salary, commute_minutes):
     return round((base_time_value * multiplier) / 10000)
 
 def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0,
-                             resident_type='rent', max_housing_budget=0):
+                             resident_type='rent', max_housing_budget=0,
+                             min_area=40, max_area=200, min_build_year=0):
     if not os.path.exists(DB_PATH): return []
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
         # 후보 단지를 넉넉히 가져와서 예산 필터링
-        cursor.execute('''
+        query = '''
             SELECT apt_name, dong_name, AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent, COUNT(*) as cnt
             FROM rent_transactions
             WHERE city_code = ? AND deal_year >= 2024
+            AND exclusive_area >= ? AND exclusive_area <= ?
+        '''
+        params = [city_code, min_area, max_area]
+        if min_build_year > 0:
+            query += ' AND build_year >= ?'
+            params.append(min_build_year)
+        query += '''
             GROUP BY apt_name, dong_name
             HAVING cnt >= 2
             ORDER BY cnt DESC LIMIT 30
-        ''', (city_code,))
+        '''
+        cursor.execute(query, params)
         rows = cursor.fetchall()
         conn.close()
 
@@ -321,6 +333,10 @@ async def optimize_location(request: OptimizeRequest):
         if request.mode == 'couple' and request.user2:
             total_salary += request.user2.salary
         max_housing_budget = round((total_salary * 10000 / 12) * request.housing_ratio / 10000)
+        # 준공년도 필터: max_building_age=0이면 전체, 아니면 현재년도-N
+        min_build_year = 0
+        if request.max_building_age > 0:
+            min_build_year = datetime.now().year - request.max_building_age
 
         results = []
         for spot in stations:
@@ -330,7 +346,7 @@ async def optimize_location(request: OptimizeRequest):
             time2 = 0
             if request.mode == 'couple' and request.user2:
                 time2 = estimate_commute_time(calculate_distance(spot['lat'], spot['lng'], request.user2.workplace.lat, request.user2.workplace.lng), request.user2.transport)
-            complexes = get_complexes_with_costs(spot.get('city_code', ''), request.user1.salary, time1, request.user2.salary if request.user2 else 0, time2, resident_type=request.resident_type, max_housing_budget=max_housing_budget)
+            complexes = get_complexes_with_costs(spot.get('city_code', ''), request.user1.salary, time1, request.user2.salary if request.user2 else 0, time2, resident_type=request.resident_type, max_housing_budget=max_housing_budget, min_area=request.min_area, max_area=request.max_area, min_build_year=min_build_year)
             if not complexes: continue
             representative_cost = complexes[0]['total_opp_cost']
             results.append({
