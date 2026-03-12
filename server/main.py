@@ -322,7 +322,19 @@ async def optimize_location(request: OptimizeRequest):
                 "complexes": complexes, "score": representative_cost
             })
         results.sort(key=lambda x: x['score'])
-        return {"results": results[:5]}
+        # 중복 단지 제거: 이미 노출된 단지명은 건너뛰기
+        seen_complexes = set()
+        deduplicated = []
+        for r in results:
+            top_name = r['complexes'][0]['name']
+            if top_name in seen_complexes:
+                continue
+            for c in r['complexes']:
+                seen_complexes.add(c['name'])
+            deduplicated.append(r)
+            if len(deduplicated) >= 5:
+                break
+        return {"results": deduplicated}
     except Exception as e:
         logger.error(f"Optimize error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
