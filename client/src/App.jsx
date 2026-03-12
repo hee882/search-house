@@ -1,31 +1,32 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, Coffee, ShieldCheck, Map as MapIcon, List, Settings2 } from 'lucide-react';
+import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, Coffee, ShieldCheck, Map as MapIcon, List, Settings2, Pencil } from 'lucide-react';
 import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds } from './lib/map';
 
 // 지하철 호선별 공식 색상
 const LINE_COLORS = {
   '1호선': '#0052A4', '2호선': '#00A84D', '3호선': '#EF7C1C', '4호선': '#00A5DE',
   '5호선': '#996CAC', '6호선': '#CD7C2F', '7호선': '#747F00', '8호선': '#E6186C',
-  '9호선': '#BDB092', '수인분당선': '#F5A200', '신분당선': '#D4003B', '경의중앙선': '#77C4A3',
-  '경의선': '#77C4A3', '경춘선': '#0C8E72', '공항철도': '#0090D2', '서해선': '#81A914', 
-  '경강선': '#003DA5', 'GTX-A': '#9A6292', '우이신설선': '#B7C452', '신림선': '#6789CA'
+  '9호선': '#BDB092',
+  '수인분당선': '#F5A200', '신분당선': '#D4003B', '경의중앙선': '#77C4A3',
+  '경의선': '#77C4A3', '경춘선': '#0C8E72', '경강선': '#003DA5',
+  '공항철도': '#0090D2', '서해선': '#81A914',
+  '우이신설선': '#B7C452', '신림선': '#6789CA', '에버라인': '#55B332',
+  '김포골드라인': '#A17E00', '의정부경전철': '#FDA600',
+  '신안산선': '#A71E31', '위례신사선': '#F5A200', '동북선': '#2E8B57',
+  '인천1호선': '#7CA8D5', '인천2호선': '#ED8000',
+  'GTX-A': '#9A6292',
 };
 
 const getLineColor = (line) => LINE_COLORS[line.trim()] || '#A0AEC0';
-const getShortLineName = (line) => {
-  const l = line.trim();
-  if (l.endsWith('호선')) return l.replace('호선', '');
-  if (l.endsWith('선')) return l.replace('선', '');
-  return l;
-};
+const getShortLineName = (line) => line.trim();
 
 function LineBadge({ line }) {
   if (!line) return null;
   const lines = line.split(/[,,/]/);
   return (
-    <div className="flex flex-wrap gap-1 items-center">
+    <div className="flex gap-1 items-center flex-nowrap">
       {lines.map((l, i) => (
-        <div key={i} className="px-1.5 py-0.5 rounded-md text-[9px] font-black text-white shadow-sm flex items-center justify-center min-w-[18px]" style={{ backgroundColor: getLineColor(l) }}>
+        <div key={i} className="px-1.5 py-0.5 rounded-md text-[8px] font-black text-white shadow-sm flex items-center justify-center whitespace-nowrap leading-tight" style={{ backgroundColor: getLineColor(l) }}>
           {getShortLineName(l)}
         </div>
       ))}
@@ -52,8 +53,24 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
 
   const filteredStations = useMemo(() => {
     if (!keyword || keyword === value?.name) return stations.slice(0, 5);
-    const searchChosung = getChosung(keyword);
-    return stations.filter(s => s.name.includes(keyword) || getChosung(s.name).includes(searchChosung)).slice(0, 8);
+    const kw = keyword.trim();
+    const searchChosung = getChosung(kw);
+    const isChosungOnly = /^[ㄱ-ㅎ]+$/.test(kw);
+    return stations
+      .filter(s => s.name.includes(kw) || getChosung(s.name).includes(searchChosung))
+      .sort((a, b) => {
+        const score = (s) => {
+          const n = s.name;
+          let sc = (s.line?.split(',').length || 1) * 2;
+          if (n === kw || n === kw + '역') sc += 100;
+          else if (n.startsWith(kw)) sc += 50;
+          else if (!isChosungOnly && n.includes(kw)) sc += 20;
+          else if (getChosung(n).startsWith(searchChosung)) sc += 15;
+          return sc;
+        };
+        return score(b) - score(a);
+      })
+      .slice(0, 10);
   }, [keyword, stations, value]);
 
   useEffect(() => {
@@ -85,9 +102,9 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
             {!keyword ? '주요 거점 추천' : '검색 결과'}
           </div>
           {filteredStations.map((s, i) => (
-            <button key={i} onClick={() => handleSelect(s)} onMouseEnter={() => setSelectedIndex(i)} className={`w-full text-left px-5 py-4 flex items-center transition-colors ${selectedIndex === i ? 'bg-blue-50 text-blue-600' : 'text-gray-600 border-b border-gray-50 last:border-0'}`}>
-              <div className="w-16 shrink-0"><LineBadge line={s.line} /></div>
-              <div className="flex-1 text-base font-black tracking-tight">{s.name}</div>
+            <button key={i} onClick={() => handleSelect(s)} onMouseEnter={() => setSelectedIndex(i)} className={`w-full text-left px-4 py-3.5 flex items-center transition-colors ${selectedIndex === i ? 'bg-blue-50 text-blue-600' : 'text-gray-600 border-b border-gray-50 last:border-0'}`}>
+              <div className="w-[40%] shrink-0 flex justify-end pr-3"><LineBadge line={s.line} /></div>
+              <div className="w-[60%] text-[15px] font-black tracking-tight">{s.name}</div>
             </button>
           ))}
         </div>
@@ -273,7 +290,7 @@ function App() {
                     <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest">분석 완료 • 07:00 기준</div>
                   </div>
                 </div>
-                <button onClick={() => {setIsMinimized(false); setIsSidebarOpen(true);}} className="p-2 text-gray-400 hover:text-white"><Edit3 size={16} /></button>
+                <button onClick={() => {setIsMinimized(false); setIsSidebarOpen(true);}} className="p-2 text-gray-400 hover:text-white"><Pencil size={16} /></button>
               </div>
             ) : (
               <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
@@ -331,7 +348,7 @@ function App() {
 
                 <button onClick={handleSearch} disabled={loading || !isReady} className="w-full bg-gray-900 hover:bg-black text-white font-black py-4.5 rounded-2xl shadow-xl active:scale-[0.98] flex items-center justify-center space-x-2">
                   {loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} strokeWidth={3} />}
-                  <span className="text-sm uppercase tracking-tighter">워라밸 구출하기</span>
+                  <span className="text-sm uppercase tracking-tighter">스마트 주거 탐색</span>
                 </button>
               </div>
             )}

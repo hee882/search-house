@@ -280,7 +280,7 @@ async def optimize_location(request: OptimizeRequest):
         results = []
         for spot in stations:
             dist_from_mid = calculate_distance(spot['lat'], spot['lng'], mid_lat, mid_lng)
-            if dist_from_mid > 15: continue
+            if dist_from_mid > 50: continue
             time1 = estimate_commute_time(calculate_distance(spot['lat'], spot['lng'], request.user1.workplace.lat, request.user1.workplace.lng), request.user1.transport)
             time2 = 0
             if request.mode == 'couple' and request.user2:
