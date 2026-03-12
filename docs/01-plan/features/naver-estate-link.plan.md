@@ -23,7 +23,7 @@
 
 ```javascript
 // App.jsx:412
-window.open(`https://m.land.naver.com/search/result?query=${complex.dong} ${complex.name}`, '_blank');
+window.open(`https://fin.land.naver.com/search?query=${complex.dong} ${complex.name}`, '_blank');
 ```
 
 - `complex.dong` = DB의 `dong_name` (예: "명륜3가", "평창동")
@@ -55,11 +55,11 @@ window.open(`https://m.land.naver.com/search/result?query=${complex.dong} ${comp
 
 ```javascript
 // Before
-window.open(`https://m.land.naver.com/search/result?query=${complex.dong} ${complex.name}`, '_blank');
+window.open(`https://fin.land.naver.com/search?query=${complex.dong} ${complex.name}`, '_blank');
 
 // After
 const query = encodeURIComponent(complex.name);
-window.open(`https://m.land.naver.com/search/result?query=${query}`, '_blank');
+window.open(`https://fin.land.naver.com/search?query=${query}`, '_blank');
 ```
 
 추가 개선:
@@ -73,7 +73,7 @@ window.open(`https://m.land.naver.com/search/result?query=${query}`, '_blank');
 
 ### P2: PC/모바일 URL 분기 (선택)
 
-- 모바일: `https://m.land.naver.com/search/result?query=...`
+- 모바일: `https://fin.land.naver.com/search?query=...`
 - PC: `https://new.land.naver.com/complexes?query=...`
 - `window.innerWidth` 기반 분기 또는 `navigator.userAgent` 체크
 
@@ -94,7 +94,7 @@ window.open(`https://m.land.naver.com/search/result?query=${query}`, '_blank');
 ```javascript
 // line 412 변경
 const query = encodeURIComponent((complex.name || '').trim());
-window.open(`https://m.land.naver.com/search/result?query=${query}`, '_blank');
+window.open(`https://fin.land.naver.com/search?query=${query}`, '_blank');
 ```
 
 #### App.jsx 변경 2: 단지 카드 클릭 시 이동
@@ -115,7 +115,7 @@ ExternalLink 아이콘에 별도 onClick 핸들러:
   onClick={(e) => {
     e.stopPropagation();
     const q = encodeURIComponent(apt.name.trim());
-    window.open(`https://m.land.naver.com/search/result?query=${q}`, '_blank');
+    window.open(`https://fin.land.naver.com/search?query=${q}`, '_blank');
   }}
 />
 ```

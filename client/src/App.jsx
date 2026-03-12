@@ -384,7 +384,7 @@ function App() {
                               <div className="flex justify-between items-center mb-0.5 gap-2">
                                 <div className="flex items-center space-x-1.5 overflow-hidden">
                                   <span className="text-[13px] font-black text-gray-800 tracking-tight truncate">{apt.name}</span>
-                                  <ExternalLink size={10} className="text-gray-300 shrink-0 hover:text-blue-500 transition-colors" onClick={(e) => { e.stopPropagation(); window.open(`https://fin.land.naver.com/complexes?query=${encodeURIComponent(apt.name.trim())}`, '_blank'); }} />
+                                  <ExternalLink size={10} className="text-gray-300 shrink-0 hover:text-blue-500 transition-colors" onClick={(e) => { e.stopPropagation(); window.open(`https://fin.land.naver.com/search?query=${encodeURIComponent(apt.name.trim())}`, '_blank'); }} />
                                 </div>
                                 <span className="text-[11px] font-black text-blue-600 shrink-0"><span className="text-[8px] text-gray-400 font-bold mr-1">{apt.display_price_label}</span>{apt.display_price_value}</span>
                               </div>
@@ -397,7 +397,7 @@ function App() {
                             </div>
                           ))}
                         </div>
-                        <button onClick={() => {const c = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0]; if(c) window.open(`https://fin.land.naver.com/complexes?query=${encodeURIComponent(c.name.trim())}`, '_blank');}} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3.5 rounded-xl text-xs transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg">
+                        <button onClick={() => {const c = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0]; if(c) window.open(`https://fin.land.naver.com/search?query=${encodeURIComponent(c.name.trim())}`, '_blank');}} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3.5 rounded-xl text-xs transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg">
                           <ExternalLink size={14} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span>
                         </button>
                       </div>
