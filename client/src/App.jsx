@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, Coffee, ShieldCheck, Map as MapIcon, List, Settings2, Pencil } from 'lucide-react';
-import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds } from './lib/map';
+import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, Coffee, ShieldCheck, Map as MapIcon, List, Settings2, Pencil, Train, X } from 'lucide-react';
+import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds, getZoom, setZoom } from './lib/map';
 
 // 지하철 호선별 공식 색상
 const LINE_COLORS = {
@@ -45,6 +45,14 @@ const getChosung = (str) => {
   return result;
 };
 
+const STATION_ALIASES = {
+  '총신대입구역': ['이수역', '이수'],
+  '총신대입구(이수)역': ['이수역', '이수'],
+  '이수역': ['총신대입구역', '총신대입구'],
+  '서울역': ['서울'],
+  '잠실역': ['신천역', '잠실새내역'],
+};
+
 function StationSearch({ value, onChange, placeholder, stations, icon: IconComponent, colorClass }) {
   const [keyword, setKeyword] = useState(value?.name || "");
   const [isOpen, setIsOpen] = useState(false);
@@ -57,12 +65,19 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
     const searchChosung = getChosung(kw);
     const isChosungOnly = /^[ㄱ-ㅎ]+$/.test(kw);
     return stations
-      .filter(s => s.name.includes(kw) || getChosung(s.name).includes(searchChosung))
+      .filter(s => {
+        const nameMatch = s.name.includes(kw) || getChosung(s.name).includes(searchChosung);
+        if (nameMatch) return true;
+        const aliases = STATION_ALIASES[s.name] || [];
+        return aliases.some(alias => alias.includes(kw) || getChosung(alias).includes(searchChosung));
+      })
       .sort((a, b) => {
         const score = (s) => {
           const n = s.name;
+          const aliases = STATION_ALIASES[n] || [];
+          const isAliasMatch = aliases.some(a => a === kw || a === kw + '역');
           let sc = (s.line?.split(',').length || 1) * 2;
-          if (n === kw || n === kw + '역') sc += 100;
+          if (n === kw || n === kw + '역' || isAliasMatch) sc += 100;
           else if (n.startsWith(kw)) sc += 50;
           else if (!isChosungOnly && n.includes(kw)) sc += 20;
           else if (getChosung(n).startsWith(searchChosung)) sc += 15;
@@ -88,23 +103,30 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
 
   return (
     <div className="relative group w-full" ref={dropdownRef}>
-      {IconComponent && <IconComponent className={`absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-300 group-focus-within:${colorClass} transition-colors`} />}
+      {IconComponent && <IconComponent className={`absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-300 group-focus-within:${colorClass} transition-colors`} />}
       <input
         type="text" value={keyword}
         onChange={(e) => { setKeyword(e.target.value); setIsOpen(true); }}
         onFocus={() => setIsOpen(true)}
-        className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl text-[15px] font-bold focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-gray-300 shadow-inner"
+        className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-transparent rounded-xl text-[13px] font-black focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-gray-300"
         placeholder={placeholder}
       />
       {isOpen && filteredStations.length > 0 && (
-        <div className="absolute bottom-full md:bottom-auto md:top-full left-0 w-full mb-2 md:mt-2 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 z-[2000] overflow-hidden">
-          <div className="px-4 py-2 bg-gray-50/50 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 text-center">
+        <div className="absolute bottom-full md:bottom-auto md:top-full left-0 w-full mb-2 md:mt-1.5 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 z-[2000] overflow-hidden">
+          <div className="px-4 py-1.5 bg-gray-50/50 text-[9px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 text-center">
             {!keyword ? '주요 거점 추천' : '검색 결과'}
           </div>
           {filteredStations.map((s, i) => (
-            <button key={i} onClick={() => handleSelect(s)} onMouseEnter={() => setSelectedIndex(i)} className={`w-full text-left px-4 py-3.5 flex items-center transition-colors ${selectedIndex === i ? 'bg-blue-50 text-blue-600' : 'text-gray-600 border-b border-gray-50 last:border-0'}`}>
-              <div className="w-[40%] shrink-0 flex justify-end pr-3"><LineBadge line={s.line} /></div>
-              <div className="w-[60%] text-[15px] font-black tracking-tight">{s.name}</div>
+            <button key={i} onClick={() => handleSelect(s)} onMouseEnter={() => setSelectedIndex(i)} className={`w-full text-left px-4 py-3 flex items-center gap-4 transition-all duration-200 ${selectedIndex === i ? 'bg-blue-50/80 border-l-[4px] border-blue-500 pl-3' : 'text-gray-600 border-b border-gray-50 last:border-0'}`}>
+              <div className={`shrink-0 p-2 rounded-xl transition-colors ${selectedIndex === i ? 'bg-white shadow-sm' : 'bg-gray-100'}`}>
+                <Train className={`h-4 w-4 ${selectedIndex === i ? 'text-blue-500' : 'text-gray-400'}`} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className={`text-[15px] font-black tracking-tight truncate ${selectedIndex === i ? 'text-blue-700' : 'text-gray-800'}`}>{s.name}</div>
+                <div className="mt-1 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                  <LineBadge line={s.line} />
+                </div>
+              </div>
             </button>
           ))}
         </div>
@@ -118,24 +140,21 @@ function App() {
   const [zoomLevel] = useState(15);
   const [mode, setMode] = useState('single');
   const [residentType, setResidentType] = useState('buy');
+  const [inputs, setInputs] = useState({
+    user1: { workplace: null, salary: 4000, transport: 'public' },
+    user2: { workplace: null, salary: 4000, transport: 'public' }
+  });
   const [loading, setLoading] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false);
+  const [results, setResults] = useState(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
   const [expandedSpotIndex, setExpandedSpotIndex] = useState(null);
   const [expandedComplexIdx, setExpandedComplexIdx] = useState(0);
   const [workplaceLocs, setWorkplaceLocs] = useState({ user1: null, user2: null });
   const [stationList, setStationList] = useState([]);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  const [inputs, setInputs] = useState({
-    user1: { workplace: null, salary: 5000, transport: 'public' },
-    user2: { workplace: null, salary: 4500, transport: 'public' },
-  });
-
-  const [results, setResults] = useState(null);
   const mapContainerRef = useRef(null);
   const markersRef = useRef([]);
   const pathsRef = useRef([]);
-
   const { map, isReady, error: mapError } = useMap(mapContainerRef, { center: mapCenter, zoom: zoomLevel });
 
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://search-house.onrender.com';
@@ -148,7 +167,6 @@ function App() {
     if (!map) return;
     pathsRef.current.forEach(p => p.setMap(null));
     pathsRef.current = [];
-
     const pts = [{ lat: spot.lat, lng: spot.lng }];
     if (workplaceLocs.user1) {
       pts.push(workplaceLocs.user1);
@@ -167,7 +185,6 @@ function App() {
     const isAlreadyExpanded = expandedSpotIndex === index;
     setExpandedSpotIndex(isAlreadyExpanded ? null : index);
     setExpandedComplexIdx(0);
-    
     if (!isAlreadyExpanded) {
       drawCommutePaths(spot, workplaceLocs, mode);
       if (window.innerWidth < 768) setIsSidebarOpen(false);
@@ -177,8 +194,9 @@ function App() {
       const allPts = [...results, workplaceLocs.user1];
       if (workplaceLocs.user2) allPts.push(workplaceLocs.user2);
       setBounds(map, allPts);
+      setTimeout(() => { const currentZoom = getZoom(map); setZoom(map, currentZoom - 2); }, 300);
     }
-  }, [expandedSpotIndex, workplaceLocs, mode, drawCommutePaths, results]);
+  }, [expandedSpotIndex, workplaceLocs, mode, drawCommutePaths, results, map]);
 
   useEffect(() => {
     if (!map || !isReady) return;
@@ -228,11 +246,12 @@ function App() {
       const response = await fetch(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await response.json();
       setResults(data.results);
-      setIsMinimized(true);
+      if (window.innerWidth < 768) setIsSidebarOpen(false);
       if (data.results?.length > 0) {
         const allPts = [...data.results, loc1];
         if (loc2) allPts.push(loc2);
         setBounds(map, allPts);
+        setTimeout(() => { const currentZoom = getZoom(map); setZoom(map, currentZoom - 2); }, 300);
         setExpandedSpotIndex(0);
         setExpandedComplexIdx(0);
         setTimeout(() => { drawCommutePaths(data.results[0], { user1: loc1, user2: loc2 }, mode); }, 600);
@@ -241,7 +260,7 @@ function App() {
   };
 
   return (
-    <div className="relative w-full h-screen overflow-hidden antialiased bg-gray-50 text-gray-900 font-sans">
+    <div className="relative w-full h-[100dvh] overflow-hidden antialiased bg-gray-50 text-gray-900 font-sans">
       {/* 1. Map Layer */}
       <div ref={mapContainerRef} className="absolute inset-0 w-full h-full z-0 bg-gray-100 flex items-center justify-center">
         {!isReady && !mapError && (
@@ -252,207 +271,182 @@ function App() {
         )}
       </div>
 
-      {/* Sidebar Container */}
-      <div className={`absolute z-[1000] bg-white transition-all duration-500 ease-in-out flex flex-col 
-        ${isSidebarOpen 
-          ? 'inset-x-4 bottom-4 h-[60vh] md:inset-y-0 md:left-0 md:right-auto md:w-[420px] rounded-[2.5rem] md:rounded-none shadow-[0_20px_60px_rgba(0,0,0,0.12)] md:shadow-[10px_0_40px_rgba(0,0,0,0.04)] border-r border-gray-100' 
-          : 'inset-x-4 bottom-[-100%] md:inset-y-0 md:left-[-420px] md:w-[420px]'
+      {/* 2. Unified Sidebar/Bottom Sheet */}
+      <div className={`absolute z-[1000] transition-all duration-500 ease-in-out flex flex-col 
+        md:inset-y-0 md:left-0 md:w-[420px] md:bg-white md:border-r md:border-gray-100 md:shadow-2xl
+        ${window.innerWidth < 768 
+          ? (isSidebarOpen ? 'inset-x-0 bottom-0 h-[85vh] bg-white rounded-t-[2.5rem] shadow-[0_-20px_60px_rgba(0,0,0,0.15)] overflow-hidden' : 'inset-x-0 bottom-[-100%]')
+          : (isSidebarOpen ? 'translate-x-0' : '-translate-x-full')
         }
       `}>
-        
-        {/* Handle bar for Mobile */}
-        <div className="md:hidden w-full h-8 flex items-center justify-center cursor-pointer shrink-0" onClick={() => setIsSidebarOpen(false)}>
-          <div className="w-12 h-1.5 bg-gray-200 rounded-full" />
-        </div>
-
-        <div className="flex flex-col h-full overflow-hidden">
-          {/* Header & Form */}
-          <div className="p-6 md:p-8 pt-2 md:pt-10 shrink-0 border-b border-gray-50">
-            <div className="flex items-center justify-between mb-6 md:mb-8">
+        <div className="flex flex-col h-full">
+          {/* Header Area - Fixed height to ensure visibility */}
+          <div className="p-6 md:p-8 shrink-0 relative bg-white z-[100] border-b border-gray-50">
+            <div className="flex items-center justify-between mb-4 md:mb-6">
               <div className="flex items-center space-x-3 cursor-pointer" onClick={() => window.location.reload()}>
-                <img src="logo.svg" alt="Logo" className="w-10 h-10 md:w-12 md:h-12 shrink-0 object-contain" />
-                <span className="text-xl md:text-2xl font-black tracking-[0.05em] uppercase text-gray-900 leading-none">Search House</span>
+                <img src="logo.svg" alt="Logo" className="w-8 h-8 md:w-12 md:h-12" />
+                <span className="text-lg md:text-2xl font-black uppercase tracking-tight">Search House</span>
               </div>
-              {!isMinimized && (
-                <button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-gray-900 md:hidden"><ChevronDown size={24} /></button>
-              )}
+              <button onClick={() => setIsSidebarOpen(false)} className="p-2 bg-gray-100 rounded-full md:hidden transition-colors active:bg-gray-200"><X size={20} /></button>
             </div>
 
-            {isMinimized ? (
-              <div className="flex items-center justify-between bg-gray-900 p-4 rounded-2xl animate-in slide-in-from-bottom-2 duration-500 shadow-xl">
-                <div className="flex items-center space-x-3">
-                  <div className="flex -space-x-2">
-                    <div className="w-8 h-8 rounded-full bg-blue-600 border-2 border-gray-900 flex items-center justify-center text-white text-[9px] font-black shadow-lg">나</div>
-                    {mode === 'couple' && <div className="w-8 h-8 rounded-full bg-pink-500 border-2 border-gray-900 flex items-center justify-center text-white text-[9px] font-black shadow-lg">배</div>}
-                  </div>
-                  <div>
-                    <div className="text-[13px] font-black text-white tracking-tight leading-none mb-1">{inputs.user1.workplace?.name}{mode === 'couple' ? ` & ${inputs.user2.workplace?.name}` : ''}</div>
-                    <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest">분석 완료 • 07:00 기준</div>
-                  </div>
+            <div className="space-y-3 md:space-y-4">
+              <div className="bg-blue-50/80 p-3 rounded-xl border border-blue-100 shadow-sm hidden md:block">
+                <div className="flex items-center space-x-2 text-blue-600 mb-1">
+                  <ShieldCheck size={16} /><span className="text-[10px] font-black uppercase tracking-widest">Fatigue Model v1.0</span>
                 </div>
-                <button onClick={() => {setIsMinimized(false); setIsSidebarOpen(true);}} className="p-2 text-gray-400 hover:text-white"><Pencil size={16} /></button>
+                <p className="text-[11px] font-bold text-gray-600 leading-tight">인생 시급과 워라밸 가치를 반영한 최적의 입지 분석</p>
               </div>
-            ) : (
-              <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
-                <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50 mb-1">
-                  <div className="flex items-center space-x-2 text-blue-600 mb-1">
-                    <ShieldCheck size={16} />
-                    <span className="text-[10px] font-black uppercase tracking-widest leading-none">Comprehensive Fatigue Model v1.0</span>
-                  </div>
-                  <p className="text-[12px] font-bold text-gray-600 leading-tight">다차원 데이터를 분석하여 최적의 거주지를 산출합니다.</p>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="flex p-1 bg-gray-100 rounded-2xl">
-                    <button onClick={() => setMode('single')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${mode === 'single' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>1인</button>
-                    <button onClick={() => setMode('couple')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${mode === 'couple' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}>부부</button>
-                  </div>
-                  {/* 임대 모드 전용 (매매 숨김) */}
-                  <div className="flex p-1 bg-gray-100 rounded-2xl hidden">
-                    <button onClick={() => setResidentType('buy')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${residentType === 'buy' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-400'}`}>매매</button>
-                    <button onClick={() => setResidentType('rent')} className={`flex-1 py-2 rounded-xl text-[11px] font-black transition-all ${residentType === 'rent' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-400'}`}>임대</button>
-                  </div>
-                </div>
 
-                <div className="space-y-3">
-                  <StationSearch stations={stationList} value={inputs.user1.workplace} onChange={(val) => setInputs({...inputs, user1: {...inputs.user1, workplace: val}})} placeholder="나의 직장 위치 (역 검색)" icon={MapPin} colorClass="text-blue-500" />
-                  <div className="flex gap-2">
-                    <div className="flex-1 relative group">
-                      <Coins className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-300" />
-                      <input type="number" value={inputs.user1.salary} onChange={(e) => setInputs({...inputs, user1: {...inputs.user1, salary: parseInt(e.target.value)||0}})} className="w-full pl-12 pr-10 py-3.5 bg-gray-50 border border-transparent rounded-2xl text-[14px] font-black outline-none focus:bg-white focus:border-blue-500" />
-                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">만원</span>
-                    </div>
-                    <div className="flex bg-gray-100 rounded-2xl p-1 shrink-0">
-                      <button onClick={() => setInputs({...inputs, user1: {...inputs.user1, transport: 'public'}})} className={`px-3 md:px-4 rounded-xl ${inputs.user1.transport === 'public' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}><Bus size={18} /></button>
-                      <button onClick={() => setInputs({...inputs, user1: {...inputs.user1, transport: 'car'}})} className={`px-3 md:px-4 rounded-xl ${inputs.user1.transport === 'car' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}><Car size={18} /></button>
+              <div className="flex p-1 bg-gray-100 rounded-xl">
+                <button onClick={() => setMode('single')} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${mode === 'single' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>1인 가구</button>
+                <button onClick={() => setMode('couple')} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${mode === 'couple' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}>부부/커플</button>
+              </div>
+
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">직장 위치</div>
+                  <StationSearch stations={stationList} value={inputs.user1.workplace} onChange={(val) => setInputs({...inputs, user1: {...inputs.user1, workplace: val}})} placeholder="나의 직장 위치 검색" icon={MapPin} colorClass="text-blue-500" />
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex-1 space-y-1">
+                    <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">연봉 (만원)</div>
+                    <div className="relative group"><Coins className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-300" /><input type="number" value={inputs.user1.salary} onChange={(e) => setInputs({...inputs, user1: {...inputs.user1, salary: parseInt(e.target.value)||0}})} className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border-none rounded-xl text-[13px] font-black outline-none focus:ring-2 focus:ring-blue-500/20" /></div>
+                  </div>
+                  <div className="shrink-0 space-y-1">
+                    <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">이동 수단</div>
+                    <div className="flex bg-gray-100 rounded-xl p-0.5 h-[42px]">
+                      <button onClick={() => setInputs({...inputs, user1: {...inputs.user1, transport: 'public'}})} className={`px-3 rounded-lg ${inputs.user1.transport === 'public' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}><Bus size={16} /></button>
+                      <button onClick={() => setInputs({...inputs, user1: {...inputs.user1, transport: 'car'}})} className={`px-3 rounded-lg ${inputs.user1.transport === 'car' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}><Car size={16} /></button>
                     </div>
                   </div>
                 </div>
+              </div>
 
-                {mode === 'couple' && (
-                  <div className="space-y-3 pt-3 border-t border-gray-50 animate-in fade-in slide-in-from-top-2">
+              {mode === 'couple' && (
+                <div className="space-y-3 pt-3 border-t border-gray-50 animate-in fade-in">
+                  <div className="space-y-1">
+                    <div className="text-[10px] font-black text-pink-400 uppercase tracking-widest pl-1">배우자 직장</div>
                     <StationSearch stations={stationList} value={inputs.user2.workplace} onChange={(val) => setInputs({...inputs, user2: {...inputs.user2, workplace: val}})} placeholder="배우자 직장 위치" icon={MapPin} colorClass="text-pink-500" />
-                    <div className="flex gap-2">
-                      <div className="flex-1 relative group">
-                        <Coins className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-300" />
-                        <input type="number" value={inputs.user2.salary} onChange={(e) => setInputs({...inputs, user2: {...inputs.user2, salary: parseInt(e.target.value)||0}})} className="w-full pl-12 pr-10 py-3.5 bg-gray-50 border border-transparent rounded-2xl text-[14px] font-black outline-none focus:bg-white focus:border-pink-500" />
-                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-gray-400">만원</span>
-                      </div>
-                      <div className="flex bg-gray-100 rounded-2xl p-1 shrink-0">
-                        <button onClick={() => setInputs({...inputs, user2: {...inputs.user2, transport: 'public'}})} className={`px-3 md:px-4 rounded-xl ${inputs.user2.transport === 'public' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}><Bus size={18} /></button>
-                        <button onClick={() => setInputs({...inputs, user2: {...inputs.user2, transport: 'car'}})} className={`px-3 md:px-4 rounded-xl ${inputs.user2.transport === 'car' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}><Car size={18} /></button>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex-1 space-y-1">
+                      <div className="text-[10px] font-black text-pink-400 uppercase tracking-widest pl-1">연봉 (만원)</div>
+                      <div className="relative group"><Coins className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-300" /><input type="number" value={inputs.user2.salary} onChange={(e) => setInputs({...inputs, user2: {...inputs.user2, salary: parseInt(e.target.value)||0}})} className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border-none rounded-xl text-[13px] font-black outline-none focus:ring-2 focus:ring-pink-500/20" /></div>
+                    </div>
+                    <div className="shrink-0 space-y-1">
+                      <div className="text-[10px] font-black text-pink-400 uppercase tracking-widest pl-1">이동 수단</div>
+                      <div className="flex bg-gray-100 rounded-xl p-0.5 h-[42px]">
+                        <button onClick={() => setInputs({...inputs, user2: {...inputs.user2, transport: 'public'}})} className={`px-3 rounded-lg ${inputs.user2.transport === 'public' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}><Bus size={16} /></button>
+                        <button onClick={() => setInputs({...inputs, user2: {...inputs.user2, transport: 'car'}})} className={`px-3 rounded-lg ${inputs.user2.transport === 'car' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}><Car size={16} /></button>
                       </div>
                     </div>
                   </div>
-                )}
+                </div>
+              )}
 
-                <button onClick={handleSearch} disabled={loading || !isReady} className="w-full bg-gray-900 hover:bg-black text-white font-black py-4.5 rounded-2xl shadow-xl active:scale-[0.98] flex items-center justify-center space-x-2">
-                  {loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} strokeWidth={3} />}
-                  <span className="text-sm uppercase tracking-tighter">스마트 주거 탐색</span>
-                </button>
-              </div>
-            )}
+              <button onClick={handleSearch} disabled={loading || !isReady} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3.5 rounded-xl shadow-xl active:scale-[0.98] flex items-center justify-center space-x-2 transition-all">
+                {loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} strokeWidth={3} />}
+                <span className="text-[14px]">스마트 주거 탐색 시작</span>
+              </button>
+            </div>
           </div>
 
-          {/* Results Area */}
-          <div className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar space-y-6">
+          {/* Results Area - Scrollable within sidebar */}
+          <div className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar space-y-4 border-t border-gray-50 bg-gray-50/30 pb-32">
             {results ? (
               <>
-                <div className="flex items-center justify-between px-2">
-                  <h5 className="text-[11px] font-black text-gray-400 uppercase tracking-widest">최적 생존 입지 <span className="ml-2 text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full text-[10px]">{results.length}</span></h5>
-                  <div className="flex items-center space-x-1 text-[10px] font-bold text-blue-500"><Zap size={12} className="fill-blue-500" /> <span>Al-Driven</span></div>
+                <div className="flex items-center justify-between px-1 mb-2">
+                  <h5 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">최적 생존 입지 <span className="ml-1 text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full text-[9px]">{results.length}</span></h5>
+                  <div className="flex items-center space-x-1 text-[9px] font-bold text-blue-500"><Zap size={11} className="fill-blue-500" /> <span>Al-Driven</span></div>
                 </div>
-                <div className="space-y-4 pb-20">
-                  {results.map((spot, i) => {
-                    const isExpanded = expandedSpotIndex === i;
-                    return (
-                      <div key={i} className={`transition-all rounded-[2rem] border overflow-hidden ${isExpanded ? 'bg-white border-blue-200 shadow-2xl ring-1 ring-blue-100 scale-[1.02]' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
-                        <button onClick={() => handleSpotClick(spot, i)} className="w-full p-6 text-left flex justify-between items-center">
-                          <div className="flex items-center space-x-4">
-                            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-sm font-black ${i === 0 ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-100 text-gray-400'}`}>{i === 0 ? <Trophy size={18} /> : i + 1}</div>
-                            <div>
-                              <div className="text-[10px] font-black text-blue-500 uppercase tracking-tighter mb-0.5">{spot.name} 인근</div>
-                              <h6 className="text-[17px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[140px] md:max-w-none">{spot.complexes[0]?.name}</h6>
-                            </div>
-                          </div>
-                          <div className="text-right ml-2">
-                            <div className="text-[9px] font-black text-gray-300 uppercase mb-0.5 whitespace-nowrap">총 손실 비용</div>
-                            <div className="text-[18px] font-black text-gray-900 tracking-tighter leading-none whitespace-nowrap">월 {spot.total_cost}만</div>
-                          </div>
-                        </button>
-                        {isExpanded && (
-                          <div className="px-6 pb-8 animate-in slide-in-from-top-4 duration-500">
-                            <div className="h-px bg-gray-100 mb-6" />
-                            <div className="space-y-3 mb-8">
-                              {spot.complexes.map((apt, idx) => (
-                                <div key={idx} onClick={() => setExpandedComplexIdx(idx)} className={`p-4 rounded-2xl border transition-all cursor-pointer ${expandedComplexIdx === idx ? 'bg-blue-50 border-blue-200 shadow-sm' : 'bg-gray-50 border-transparent'}`}>
-                                  <div className="flex justify-between items-center mb-1 gap-2">
-                                    <div className="flex items-center space-x-2 overflow-hidden">
-                                      <span className="text-[14px] font-black text-gray-800 tracking-tight truncate">{apt.name}</span>
-                                      <ExternalLink size={12} className="text-gray-300 shrink-0 hover:text-blue-500 transition-colors" onClick={(e) => { e.stopPropagation(); window.open(`https://m.land.naver.com/search/result?query=${encodeURIComponent(apt.name.trim())}`, '_blank'); }} />
-                                    </div>
-                                    <span className="text-[12px] font-black text-blue-600 shrink-0">
-                                      <span className="text-[9px] text-gray-400 font-bold mr-1">{apt.display_price_label}</span>
-                                      {apt.display_price_value}
-                                    </span>
-                                  </div>
-                                  {expandedComplexIdx === idx && (
-                                    <div className="mt-4 grid grid-cols-2 gap-2 animate-in fade-in duration-300">
-                                      <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm text-center"><div className="text-[9px] font-black text-gray-400 uppercase mb-1">월 지출</div><div className="text-[14px] font-black text-gray-900">{apt.fixed_monthly_exp}만</div></div>
-                                      <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm text-center"><div className="text-[9px] font-black text-gray-400 uppercase mb-1 text-orange-500">에너지 비용</div><div className="text-[14px] font-black text-gray-900">{apt.hidden_life_cost}만</div></div>
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                            <button 
-                              onClick={() => {
-                                const complex = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0];
-                                if (complex) {
-                                  window.open(`https://m.land.naver.com/search/result?query=${encodeURIComponent(complex.name.trim())}`, '_blank');
-                                }
-                              }} 
-                              className="w-full bg-gray-900 hover:bg-black text-white font-black py-4 rounded-2xl text-sm transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg"
-                            >
-                              <ExternalLink size={18} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span>
-                            </button>
-                          </div>
-                        )}
+                {results.map((spot, i) => (
+                  <div key={i} className={`transition-all rounded-[1.5rem] border overflow-hidden ${expandedSpotIndex === i ? 'bg-white border-blue-200 shadow-xl ring-1 ring-blue-100 scale-[1.01]' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
+                    <button onClick={() => handleSpotClick(spot, i)} className="w-full p-4 text-left flex justify-between items-center">
+                      <div className="flex items-center space-x-3">
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black ${i === 0 ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-400'}`}>{i === 0 ? <Trophy size={16} /> : i + 1}</div>
+                        <div>
+                          <div className="text-[9px] font-black text-blue-500 uppercase tracking-tighter mb-0.5">{spot.name} 인근</div>
+                          <h6 className="text-[15px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[160px]">{spot.complexes[0]?.name}</h6>
+                        </div>
                       </div>
-                    );
-                  })}
-                </div>
-                <div className="mt-8 p-10 bg-gray-50/30 rounded-[3rem] border border-gray-100 text-center opacity-40 space-y-4">
-                  <div className="flex justify-center space-x-4 text-[10px] font-black uppercase">
-                    <button className="hover:text-blue-600 transition-colors">이용약관</button>
-                    <button className="hover:text-blue-600 transition-colors">개인정보처리방침</button>
+                      <div className="text-right ml-2">
+                        <div className="text-[8px] font-black text-gray-300 uppercase mb-0.5 whitespace-nowrap">총 손실 비용</div>
+                        <div className="text-[16px] font-black text-gray-900 tracking-tighter leading-none whitespace-nowrap">월 {spot.total_cost}만</div>
+                      </div>
+                    </button>
+                    {expandedSpotIndex === i && (
+                      <div className="px-4 pb-5 animate-in slide-in-from-top-4 duration-500">
+                        <div className="h-px bg-gray-100 mb-4" />
+                        <div className="space-y-2 mb-5">
+                          {spot.complexes.map((apt, idx) => (
+                            <div key={idx} onClick={() => setExpandedComplexIdx(idx)} className={`p-3 rounded-xl border transition-all cursor-pointer ${expandedComplexIdx === idx ? 'bg-blue-50 border-blue-200 shadow-sm' : 'bg-gray-50 border-transparent'}`}>
+                              <div className="flex justify-between items-center mb-0.5 gap-2">
+                                <div className="flex items-center space-x-1.5 overflow-hidden">
+                                  <span className="text-[13px] font-black text-gray-800 tracking-tight truncate">{apt.name}</span>
+                                  <ExternalLink size={10} className="text-gray-300 shrink-0 hover:text-blue-500 transition-colors" onClick={(e) => { e.stopPropagation(); window.open(`https://fin.land.naver.com/complexes?query=${encodeURIComponent(apt.name.trim())}`, '_blank'); }} />
+                                </div>
+                                <span className="text-[11px] font-black text-blue-600 shrink-0"><span className="text-[8px] text-gray-400 font-bold mr-1">{apt.display_price_label}</span>{apt.display_price_value}</span>
+                              </div>
+                              {expandedComplexIdx === idx && (
+                                <div className="mt-3 grid grid-cols-2 gap-2 animate-in fade-in duration-300">
+                                  <div className="bg-white p-2 rounded-lg border border-blue-100 shadow-sm text-center"><div className="text-[8px] font-black text-gray-400 uppercase mb-0.5">월 지출</div><div className="text-[12px] font-black text-gray-900">{apt.fixed_monthly_exp}만</div></div>
+                                  <div className="bg-white p-2 rounded-lg border border-blue-100 shadow-sm text-center"><div className="text-[8px] font-black text-gray-400 uppercase mb-0.5 text-orange-500">에너지 비용</div><div className="text-[12px] font-black text-gray-900">{apt.hidden_life_cost}만</div></div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <button onClick={() => {const c = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0]; if(c) window.open(`https://fin.land.naver.com/complexes?query=${encodeURIComponent(c.name.trim())}`, '_blank');}} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3.5 rounded-xl text-xs transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg">
+                          <ExternalLink size={14} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <p className="text-[9px] font-medium leading-relaxed">수도권 샐러리맨의 워라밸을 응원합니다.<br/>© 2026 SEARCH HOUSE. All rights reserved.</p>
+                ))}
+                <div className="mt-6 p-8 pb-40 bg-white/40 rounded-[2rem] border border-gray-100 text-center opacity-60 space-y-3">
+                  <h6 className="text-[12px] font-black text-gray-900 leading-tight">통근 시간은 버려지는 기회비용입니다</h6>
+                  <p className="text-[10px] font-bold text-gray-500 leading-relaxed">왕복 2시간 통근은 연간 약 20일의 자유를 뺏습니다.<br/>인생 시급을 기준으로 주거를 다시 정의하세요.</p>
                 </div>
               </>
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center p-8 mt-2">
-                <div className="w-24 h-24 bg-blue-50 rounded-[3rem] flex items-center justify-center mb-6 animate-bounce">
-                  <Coffee size={40} className="text-blue-500" />
+              <div className="flex flex-col items-center justify-center text-center p-6 py-12 animate-in fade-in zoom-in duration-700">
+                <div className="w-14 h-14 bg-blue-600/10 rounded-2xl flex items-center justify-center mb-6 relative"><div className="absolute inset-0 bg-blue-400 rounded-2xl animate-ping opacity-20" /><Coins size={24} className="text-blue-600" /></div>
+                <h4 className="text-[19px] font-black text-gray-900 mb-5 tracking-tighter leading-[1.25]">매일 버려지는 당신의 시간은<br/><span className="text-blue-600 text-[21px]">수백만원의 기회비용</span>입니다</h4>
+                <div className="space-y-4 max-w-[270px] mx-auto text-left">
+                  <div className="flex items-start space-x-3"><div className="shrink-0 mt-1 w-4 h-4 rounded-full bg-blue-50 flex items-center justify-center"><Zap size={10} className="text-blue-600" /></div><p className="text-[11.5px] font-bold text-gray-500 leading-tight">왕복 2시간 통근은 <span className="text-gray-900 font-black">연간 약 20일</span>의 자유시간을 연기처럼 사라지게 만듭니다.</p></div>
+                  <div className="flex items-start space-x-3"><div className="shrink-0 mt-1 w-4 h-4 rounded-full bg-green-50 flex items-center justify-center"><ShieldCheck size={10} className="text-green-600" /></div><p className="text-[11.5px] font-bold text-gray-500 leading-tight">당신의 <span className="text-gray-900 font-black">인생 시급</span>을 기준으로 가장 '풍요로운' 삶을 찾아보세요.</p></div>
                 </div>
-                <h4 className="text-lg font-black text-gray-900 mb-3 tracking-tighter leading-tight">더 스마트한 주거지 탐색<br/>인생의 질을 높여보세요</h4>
-                <p className="text-[13px] font-bold text-gray-400 tracking-tight leading-relaxed">단순 거리 기반이 아닌, 당신의 <br/><span className="text-gray-600">인생 시급과 워라밸 가치</span>를 최우선으로 계산합니다.</p>
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Floating Toggle Button for Mobile */}
-      {!isSidebarOpen && (
-        <button 
-          onClick={() => setIsSidebarOpen(true)}
-          className="md:hidden absolute bottom-8 left-1/2 -translate-x-1/2 z-[1100] px-6 py-3.5 bg-gray-900 text-white rounded-full shadow-2xl flex items-center space-x-2 font-black transition-all active:scale-95"
-        >
-          <Search size={18} />
-          <span>분석 도구 열기</span>
-        </button>
+      {/* 3. Mobile Result Carousel (Slider) */}
+      {results && !isSidebarOpen && (
+        <div className="md:hidden absolute bottom-6 inset-x-0 z-[1100] flex overflow-x-auto no-scrollbar gap-4 px-4 snap-x">
+          {results.map((spot, i) => (
+            <div key={i} onClick={() => handleSpotClick(spot, i)} className={`flex-none w-[80vw] snap-center bg-white/90 backdrop-blur-xl p-5 rounded-[2rem] shadow-2xl border-2 transition-all ${expandedSpotIndex === i ? 'border-blue-500' : 'border-transparent'}`}>
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black ${i === 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{i + 1}</div>
+                  <div><div className="text-[10px] font-black text-blue-500 uppercase">{spot.name} 인근</div><h6 className="text-base font-black tracking-tight truncate w-32">{spot.complexes[0]?.name}</h6></div>
+                </div>
+                <div className="text-right"><div className="text-[18px] font-black text-gray-900 leading-none">월 {spot.total_cost}만</div><div className="text-[9px] font-black text-gray-300 uppercase mt-1">총 손실 비용</div></div>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
+
+      {/* 4. Unified Mobile FAB */}
+      <button 
+        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+        className="md:hidden absolute bottom-8 right-6 z-[1100] w-14 h-14 bg-gray-900 text-white rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all border-2 border-white/20"
+      >
+        {isSidebarOpen ? <X size={24} /> : (results ? <List size={24} /> : <Search size={24} />)}
+      </button>
     </div>
   );
 }
