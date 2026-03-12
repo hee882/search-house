@@ -22,3 +22,5 @@ export const clearMarkers = (...args) => p.clearMarkers(...args);
 export const geocodeAddress = (...args) => p.geocodeAddress(...args);
 export const drawPolyline = (...args) => p.drawPolyline(...args);
 export const setBounds = (...args) => p.setBounds(...args);
+export const getZoom = (...args) => p.getZoom(...args);
+export const setZoom = (...args) => p.setZoom(...args);
