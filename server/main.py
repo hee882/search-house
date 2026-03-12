@@ -63,6 +63,26 @@ DB_PATH = os.path.join(BASE_DIR, "server", "data", "search_house.db")
 STATIONS_PATH = os.path.join(BASE_DIR, "server", "data", "stations.json")
 FRONTEND_DIST = os.path.join(BASE_DIR, "client", "dist")
 
+# --- Global Data ---
+STATIONS_DATA = []
+
+def load_stations():
+    global STATIONS_DATA
+    try:
+        if os.path.exists(STATIONS_PATH):
+            with open(STATIONS_PATH, "r", encoding="utf-8") as f:
+                STATIONS_DATA = json.load(f)
+            logger.info(f"Loaded {len(STATIONS_DATA)} stations from {STATIONS_PATH}")
+        else:
+            logger.warning(f"Stations file not found: {STATIONS_PATH}")
+            STATIONS_DATA = []
+    except Exception as e:
+        logger.error(f"Failed to load stations: {e}")
+        STATIONS_DATA = []
+
+# Initial load
+load_stations()
+
 # --- Database & Helper Functions ---
 
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -261,20 +281,17 @@ async def get_new_highs(city_code: str, limit: int = 20):
 
 @app.get("/api/stations")
 async def get_stations():
-    try:
-        if not os.path.exists(STATIONS_PATH):
-            return []
-        with open(STATIONS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Error loading stations: {e}")
-        return []
+    if not STATIONS_DATA:
+        # Retry loading once if memory is empty
+        load_stations()
+    return STATIONS_DATA
 
 @app.post("/api/optimize")
 async def optimize_location(request: OptimizeRequest):
     try:
-        with open(STATIONS_PATH, "r", encoding="utf-8") as f:
-            stations = json.load(f)
+        if not STATIONS_DATA:
+            load_stations()
+        stations = STATIONS_DATA
         mid_lat = (request.user1.workplace.lat + (request.user2.workplace.lat if request.user2 else request.user1.workplace.lat)) / 2
         mid_lng = (request.user1.workplace.lng + (request.user2.workplace.lng if request.user2 else request.user1.workplace.lng)) / 2
         results = []
