@@ -389,7 +389,7 @@ function App() {
                                   <div className="flex justify-between items-center mb-1 gap-2">
                                     <div className="flex items-center space-x-2 overflow-hidden">
                                       <span className="text-[14px] font-black text-gray-800 tracking-tight truncate">{apt.name}</span>
-                                      <ExternalLink size={12} className="text-gray-300 shrink-0" />
+                                      <ExternalLink size={12} className="text-gray-300 shrink-0 hover:text-blue-500 transition-colors" onClick={(e) => { e.stopPropagation(); window.open(`https://m.land.naver.com/search/result?query=${encodeURIComponent(apt.name.trim())}`, '_blank'); }} />
                                     </div>
                                     <span className="text-[12px] font-black text-blue-600 shrink-0">
                                       <span className="text-[9px] text-gray-400 font-bold mr-1">{apt.display_price_label}</span>
@@ -409,7 +409,7 @@ function App() {
                               onClick={() => {
                                 const complex = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0];
                                 if (complex) {
-                                  window.open(`https://m.land.naver.com/search/result?query=${complex.dong} ${complex.name}`, '_blank');
+                                  window.open(`https://m.land.naver.com/search/result?query=${encodeURIComponent(complex.name.trim())}`, '_blank');
                                 }
                               }} 
                               className="w-full bg-gray-900 hover:bg-black text-white font-black py-4 rounded-2xl text-sm transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg"
