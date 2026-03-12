@@ -53,7 +53,7 @@ const STATION_ALIASES = {
   '잠실역': ['신천역', '잠실새내역'],
 };
 
-function StationSearch({ value, onChange, placeholder, stations, icon: IconComponent, colorClass }) {
+function StationSearch({ value, onChange, placeholder, stations, icon: IconComponent, colorClass, stationLoading, stationError, onRetry }) {
   const [keyword, setKeyword] = useState(value?.name || "");
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
@@ -111,8 +111,14 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
         className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-transparent rounded-xl text-[13px] font-black focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-gray-300"
         placeholder={placeholder}
       />
-      {isOpen && filteredStations.length > 0 && (
+      {isOpen && (stationLoading || stationError || filteredStations.length > 0) && (
         <div className="absolute bottom-full md:bottom-auto md:top-full left-0 w-full mb-2 md:mt-1.5 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 z-[2000] overflow-hidden">
+          {stationLoading ? (
+            <div className="px-4 py-6 text-center"><Loader2 className="animate-spin mx-auto mb-2 text-blue-400" size={20} /><div className="text-[11px] font-bold text-gray-400">역 데이터 로딩 중...</div></div>
+          ) : stationError ? (
+            <div className="px-4 py-4 text-center"><div className="text-[11px] font-bold text-red-400 mb-2">데이터를 불러올 수 없습니다</div><button onClick={onRetry} className="text-[11px] font-black text-blue-500 hover:underline">재시도</button></div>
+          ) : (
+          <>
           <div className="px-4 py-1.5 bg-gray-50/50 text-[9px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 text-center">
             {!keyword ? '주요 거점 추천' : '검색 결과'}
           </div>
@@ -122,13 +128,22 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
                 <Train className={`h-4 w-4 ${selectedIndex === i ? 'text-blue-500' : 'text-gray-400'}`} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className={`text-[15px] font-black tracking-tight truncate ${selectedIndex === i ? 'text-blue-700' : 'text-gray-800'}`}>{s.name}</div>
+                <div className={`text-[15px] font-black tracking-tight truncate ${selectedIndex === i ? 'text-blue-700' : 'text-gray-800'}`}>
+                  {s.name}
+                  {STATION_ALIASES[s.name] && (
+                    <span className="ml-1.5 text-[12px] font-bold text-gray-400 group-hover:text-blue-400">
+                      ({STATION_ALIASES[s.name][0].replace('역', '')})
+                    </span>
+                  )}
+                </div>
                 <div className="mt-1 flex items-center gap-2 overflow-x-auto no-scrollbar">
                   <LineBadge line={s.line} />
                 </div>
               </div>
             </button>
           ))}
+          </>
+          )}
         </div>
       )}
     </div>
@@ -151,6 +166,8 @@ function App() {
   const [expandedComplexIdx, setExpandedComplexIdx] = useState(0);
   const [workplaceLocs, setWorkplaceLocs] = useState({ user1: null, user2: null });
   const [stationList, setStationList] = useState([]);
+  const [stationLoading, setStationLoading] = useState(true);
+  const [stationError, setStationError] = useState(null);
 
   const mapContainerRef = useRef(null);
   const markersRef = useRef([]);
@@ -159,9 +176,24 @@ function App() {
 
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://search-house.onrender.com';
 
-  useEffect(() => {
-    fetch(`${API_BASE_URL}/api/stations`).then(res => res.json()).then(setStationList).catch(console.error);
+  const fetchStations = useCallback(async () => {
+    setStationLoading(true);
+    setStationError(null);
+    for (let i = 0; i < 3; i++) {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/stations`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.length > 0) { setStationList(data); setStationLoading(false); return; }
+        throw new Error('빈 데이터');
+      } catch (e) {
+        if (i === 2) { setStationError(e.message); setStationLoading(false); return; }
+        await new Promise(r => setTimeout(r, 1500 * (i + 1)));
+      }
+    }
   }, [API_BASE_URL]);
+
+  useEffect(() => { fetchStations(); }, [fetchStations]);
 
   const drawCommutePaths = useCallback((spot, workplaceLocs, mode) => {
     if (!map) return;
@@ -306,7 +338,7 @@ function App() {
               <div className="space-y-3">
                 <div className="space-y-1">
                   <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">직장 위치</div>
-                  <StationSearch stations={stationList} value={inputs.user1.workplace} onChange={(val) => setInputs({...inputs, user1: {...inputs.user1, workplace: val}})} placeholder="나의 직장 위치 검색" icon={MapPin} colorClass="text-blue-500" />
+                  <StationSearch stations={stationList} value={inputs.user1.workplace} onChange={(val) => setInputs({...inputs, user1: {...inputs.user1, workplace: val}})} placeholder="나의 직장 위치 검색" icon={MapPin} colorClass="text-blue-500" stationLoading={stationLoading} stationError={stationError} onRetry={fetchStations} />
                 </div>
                 <div className="flex gap-2">
                   <div className="flex-1 space-y-1">
@@ -327,7 +359,7 @@ function App() {
                 <div className="space-y-3 pt-3 border-t border-gray-50 animate-in fade-in">
                   <div className="space-y-1">
                     <div className="text-[10px] font-black text-pink-400 uppercase tracking-widest pl-1">배우자 직장</div>
-                    <StationSearch stations={stationList} value={inputs.user2.workplace} onChange={(val) => setInputs({...inputs, user2: {...inputs.user2, workplace: val}})} placeholder="배우자 직장 위치" icon={MapPin} colorClass="text-pink-500" />
+                    <StationSearch stations={stationList} value={inputs.user2.workplace} onChange={(val) => setInputs({...inputs, user2: {...inputs.user2, workplace: val}})} placeholder="배우자 직장 위치" icon={MapPin} colorClass="text-pink-500" stationLoading={stationLoading} stationError={stationError} onRetry={fetchStations} />
                   </div>
                   <div className="flex gap-2">
                     <div className="flex-1 space-y-1">

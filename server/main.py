@@ -80,8 +80,19 @@ def load_stations():
         logger.error(f"Failed to load stations: {e}")
         STATIONS_DATA = []
 
-# Initial load
+# Initial load (모듈 레벨 동기 로드)
 load_stations()
+
+@app.on_event("startup")
+async def startup_event():
+    """서버 시작 시 stations 데이터 보장"""
+    if not STATIONS_DATA:
+        load_stations()
+    logger.info(f"Server ready: {len(STATIONS_DATA)} stations loaded")
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "stations": len(STATIONS_DATA)}
 
 # --- Database & Helper Functions ---
 

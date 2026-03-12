@@ -1,33 +1,95 @@
-# Plan: 백엔드 역 검색 간헐적 오류 해결
+# [Plan] 백엔드 역 검색 간헐적 오류 해결
 
-## 1. 개요 (Overview)
-백엔드 역 검색 기능(`/api/stations`)이 간헐적으로 실패하거나 빈 데이터를 반환하는 문제를 해결합니다. PDCA 방법론에 따라 원인 분석, 설계, 구현, 검증을 진행합니다.
+## Executive Summary
 
-## 2. 현재 문제점 (Current Issues)
-- 사용자가 역 검색 시 결과가 나오지 않거나, 서버 응답이 불안정함.
-- `server.log`에 명확한 에러 기록이 남지 않아 원인 파악이 어려움.
-- `stations.json` 파일을 매 요청마다 로드하여 파일 I/O 병목 또는 파일 잠금(Lock) 가능성 존재.
+| 항목 | 내용 |
+| ---- | ---- |
+| Feature | backend-station-search-fix |
+| 시작일 | 2026-03-12 |
+| 목표 | 역 검색 API 응답 안정성 100% 달성 |
 
-## 3. 목표 (Goals)
-- 역 검색 성공률 100% 달성.
-- 서버 로그 강화를 통해 장애 발생 시 즉각적인 원인 파악 가능하도록 개선.
-- 메모리 캐싱을 도입하여 응답 속도 및 안정성 향상.
+### Value Delivered
 
-## 4. 작업 단계 (Action Items)
-- **Phase 1: Research (조사)**
-    - `stations.json` 파일 상태 점검 (존재 여부, 크기, 인코딩).
-    - `server/main.py`의 로깅 설정 및 에러 핸들링 로직 검토.
-    - 재현 테스트 스크립트 작성 및 실행.
-- **Phase 2: Design (설계)**
-    - 메모리 캐싱 로직 설계 (서버 시작 시 1회 로드).
-    - 예외 처리 및 폴백(Fallback) 메커니즘 설계.
-- **Phase 3: Execution (구현)**
-    - 설계된 로직을 `server/main.py`에 반영.
-    - 성능 및 안정성 테스트 수행.
-- **Phase 4: Validation (검증)**
-    - PDCA 체크리스트 확인 및 최종 보고서 작성.
+| 관점 | 내용 |
+| ---- | ---- |
+| **Problem** | `/api/stations` 호출 시 Render cold start(15분 비활성 후 슬립) + 재시도 없는 fetch로 인해 빈 결과가 간헐적으로 반환됨 |
+| **Solution** | 백엔드: startup 이벤트로 데이터 보장 + 헬스체크. 프론트: 재시도 로직 + 로딩/에러 UI |
+| **Function UX Effect** | 역 검색 드롭다운이 항상 620개역을 정상 표시하고, 로딩/에러 상태를 명확히 안내 |
+| **Core Value** | 서비스 첫인상 개선 + 사용자 이탈 방지 |
 
-## 5. 일정 (Schedule)
-- [ ] Research & Analysis: 2026-03-12
-- [ ] Design & Implementation: 2026-03-12
-- [ ] Testing & Final Report: 2026-03-12
+## 1. 현황 분석
+
+### 1.1 문제 재현 시나리오
+
+1. Render 무료 티어에서 15분 비활성 → 서버 슬립
+2. 사용자 접속 → 프론트 `fetch(/api/stations)` 호출
+3. Render cold start (5~30초 소요) → 요청 타임아웃 또는 지연
+4. `catch(console.error)` — 실패 시 `stationList = []` 유지
+5. 역 검색 드롭다운에 아무것도 표시되지 않음
+
+### 1.2 코드 분석
+
+**백엔드 (`server/main.py`)**:
+- `load_stations()`가 모듈 레벨에서 동기 호출 (line 84) — 이것은 정상
+- `/api/stations` 엔드포인트에서 empty일 경우 1회 retry (line 286) — 부분적 방어
+- 문제: startup 이벤트 미사용, 헬스체크 없음
+
+**프론트엔드 (`client/src/App.jsx:170`)**:
+```javascript
+fetch(`${API_BASE_URL}/api/stations`).then(res => res.json()).then(setStationList).catch(console.error);
+```
+- 재시도 로직 없음
+- HTTP 에러 상태 체크 없음 (`res.ok` 미확인)
+- 로딩/에러 UI 없음
+
+## 2. 해결 방안
+
+### P0: 프론트엔드 재시도 로직 (핵심)
+
+```javascript
+// 지수 백오프 재시도 (최대 3회)
+const fetchWithRetry = async (url, retries = 3) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      if (i === retries - 1) throw e;
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
+};
+```
+
+### P1: 백엔드 startup 이벤트 + 헬스체크
+
+```python
+@app.on_event("startup")
+async def startup_event():
+    load_stations()
+    logger.info(f"Server ready: {len(STATIONS_DATA)} stations loaded")
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "stations": len(STATIONS_DATA)}
+```
+
+### P2: 프론트엔드 로딩/에러 상태 표시
+
+- 역 로딩 중: 스피너 또는 "역 데이터 로딩 중..." 텍스트
+- 역 로딩 실패: "역 데이터를 불러올 수 없습니다. 재시도" 버튼
+
+## 3. 구현 계획
+
+| 파일 | 변경 | 비고 |
+| ---- | ---- | ---- |
+| `server/main.py` | **수정** | startup 이벤트, 헬스체크 엔드포인트 |
+| `client/src/App.jsx` | **수정** | fetchWithRetry, 로딩/에러 상태 |
+
+## 4. 검증 방법
+
+1. `curl /api/health` → `{"status": "ok", "stations": 620}` 확인
+2. `curl /api/stations` → 620개역 정상 반환 확인
+3. 프론트: 네트워크 탭에서 fetch 실패 시 재시도 동작 확인
+4. 프론트: API_BASE_URL을 잘못된 URL로 변경 후 에러 UI 표시 확인
