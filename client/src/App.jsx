@@ -163,6 +163,7 @@ function App() {
   const [zoomLevel] = useState(15);
   const [mode, setMode] = useState('single');
   const [residentType, setResidentType] = useState('buy');
+  const [housingRatio, setHousingRatio] = useState(0.25);
   const [inputs, setInputs] = useState({
     user1: { workplace: null, salary: 4000, transport: 'public' },
     user2: { workplace: null, salary: 4000, transport: 'public' }
@@ -282,7 +283,7 @@ function App() {
       const loc1 = inputs.user1.workplace;
       const loc2 = mode === 'couple' ? inputs.user2.workplace : null;
       setWorkplaceLocs({ user1: loc1, user2: loc2 });
-      const payload = { mode, resident_type: residentType, user1: { workplace: loc1, salary: inputs.user1.salary, transport: inputs.user1.transport }, user2: loc2 ? { workplace: loc2, salary: inputs.user2.salary, transport: inputs.user2.transport } : null };
+      const payload = { mode, resident_type: residentType, housing_ratio: housingRatio, user1: { workplace: loc1, salary: inputs.user1.salary, transport: inputs.user1.transport }, user2: loc2 ? { workplace: loc2, salary: inputs.user2.salary, transport: inputs.user2.transport } : null };
       const response = await fetch(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await response.json();
       setResults(data.results);
@@ -384,6 +385,22 @@ function App() {
                   </div>
                 </div>
               )}
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between px-1">
+                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">소득 대비 주거비 한도</div>
+                  <div className="text-[11px] font-black text-blue-600">
+                    월 {Math.round(((mode === 'couple' ? inputs.user1.salary + inputs.user2.salary : inputs.user1.salary) * housingRatio / 12))}만원 이내
+                  </div>
+                </div>
+                <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
+                  {[0.1, 0.2, 0.25, 0.3, 0.4].map((ratio) => (
+                    <button key={ratio} onClick={() => setHousingRatio(ratio)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${housingRatio === ratio ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}>
+                      {Math.round(ratio * 100)}%
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <button onClick={handleSearch} disabled={loading || !isReady} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3.5 rounded-xl shadow-xl active:scale-[0.98] flex items-center justify-center space-x-2 transition-all">
                 {loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} strokeWidth={3} />}

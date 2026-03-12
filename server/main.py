@@ -56,6 +56,7 @@ class OptimizeRequest(BaseModel):
     user2: Optional[UserProfile] = None
     mode: str = 'single'
     resident_type: str = 'buy'
+    housing_ratio: float = 0.25
 
 # --- Paths ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -114,31 +115,40 @@ def calculate_hidden_life_cost(salary, commute_minutes):
     elif commute_minutes >= 45: multiplier = 1.15
     return round((base_time_value * multiplier) / 10000)
 
-def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0, resident_type='rent'):
+def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0,
+                             resident_type='rent', max_housing_budget=0):
     if not os.path.exists(DB_PATH): return []
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        
-        # 최근 전월세 거래 가져오기
+
+        # 후보 단지를 넉넉히 가져와서 예산 필터링
         cursor.execute('''
             SELECT apt_name, dong_name, AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent, COUNT(*) as cnt
             FROM rent_transactions
             WHERE city_code = ? AND deal_year >= 2024
             GROUP BY apt_name, dong_name
-            ORDER BY cnt DESC LIMIT 3
+            HAVING cnt >= 2
+            ORDER BY cnt DESC LIMIT 30
         ''', (city_code,))
         rows = cursor.fetchall()
         conn.close()
-        
-        complexes = []
+
+        candidates = []
         for row in rows:
             avg_deposit = int(row[2])
             avg_rent = int(row[3])
-            
+
+            # 월 주거비용 (보증금 이자 4% 가정 + 월세)
+            monthly_housing_cost = round((avg_deposit * 0.04) / 12) + avg_rent
+
+            # 예산 필터: 주거비가 예산 초과하면 건너뛰기
+            if max_housing_budget > 0 and monthly_housing_cost > max_housing_budget:
+                continue
+
             rent_type = "전세" if avg_rent == 0 else "월세"
             display_price_label = rent_type
-            
+
             # 억 단위 포맷팅
             if avg_deposit >= 10000:
                 eok = avg_deposit // 10000
@@ -146,23 +156,21 @@ def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0, resi
                 dep_str = f"{eok}억" + (f" {man}만" if man > 0 else "")
             else:
                 dep_str = f"{avg_deposit}만"
-            
+
             if rent_type == "월세":
                 display_price_value = f"{dep_str} / {avg_rent}만"
             else:
                 display_price_value = f"{dep_str}"
-            
-            # 월 주거비용 (보증금 이자 4% 가정 + 월세)
-            monthly_housing_cost = round((avg_deposit * 0.04) / 12) + avg_rent
-            base_transport_cost = 10 
+
+            base_transport_cost = 10
             hidden_cost1 = calculate_hidden_life_cost(salary1, time1)
             hidden_cost2 = calculate_hidden_life_cost(salary2, time2) if salary2 > 0 else 0
             fixed_monthly_exp = monthly_housing_cost + base_transport_cost
             total_hidden_life_cost = hidden_cost1 + hidden_cost2
             total_opp_cost = fixed_monthly_exp + total_hidden_life_cost
-            
-            complexes.append({
-                "name": row[0], "dong": row[1], 
+
+            candidates.append({
+                "name": row[0], "dong": row[1],
                 "rent_type": rent_type,
                 "deposit": avg_deposit,
                 "monthly_rent": avg_rent,
@@ -173,7 +181,10 @@ def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0, resi
                 "total_opp_cost": total_opp_cost,
                 "housing_cost_only": monthly_housing_cost
             })
-        return complexes
+
+        # 예산 내에서 주거비 높은 순 정렬 (예산 꽉 채운 = 더 좋은 단지)
+        candidates.sort(key=lambda x: x['housing_cost_only'], reverse=True)
+        return candidates[:3]
     except Exception as e:
         logger.error(f"Complex calculation error: {e}")
         return []
@@ -305,6 +316,12 @@ async def optimize_location(request: OptimizeRequest):
         stations = STATIONS_DATA
         mid_lat = (request.user1.workplace.lat + (request.user2.workplace.lat if request.user2 else request.user1.workplace.lat)) / 2
         mid_lng = (request.user1.workplace.lng + (request.user2.workplace.lng if request.user2 else request.user1.workplace.lng)) / 2
+        # 월 주거비 예산 계산 (만원 단위)
+        total_salary = request.user1.salary
+        if request.mode == 'couple' and request.user2:
+            total_salary += request.user2.salary
+        max_housing_budget = round((total_salary * 10000 / 12) * request.housing_ratio / 10000)
+
         results = []
         for spot in stations:
             dist_from_mid = calculate_distance(spot['lat'], spot['lng'], mid_lat, mid_lng)
@@ -313,7 +330,7 @@ async def optimize_location(request: OptimizeRequest):
             time2 = 0
             if request.mode == 'couple' and request.user2:
                 time2 = estimate_commute_time(calculate_distance(spot['lat'], spot['lng'], request.user2.workplace.lat, request.user2.workplace.lng), request.user2.transport)
-            complexes = get_complexes_with_costs(spot.get('city_code', ''), request.user1.salary, time1, request.user2.salary if request.user2 else 0, time2, resident_type=request.resident_type)
+            complexes = get_complexes_with_costs(spot.get('city_code', ''), request.user1.salary, time1, request.user2.salary if request.user2 else 0, time2, resident_type=request.resident_type, max_housing_budget=max_housing_budget)
             if not complexes: continue
             representative_cost = complexes[0]['total_opp_cost']
             results.append({
