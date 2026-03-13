@@ -252,6 +252,9 @@ function HelpModal({ isOpen, onClose }) {
                 <div className="text-[11px] font-black text-gray-800 font-mono">실제 지출(주거비+교통비) + 숨은 비용(시간 가치)</div>
                 <div className="text-[9px] font-bold text-gray-400 mt-1">이 값이 낮은 순서로 최적 입지를 추천합니다</div>
               </div>
+              <div className="pt-1">
+                <p className="text-[9px] font-black text-gray-400">※ 통근 시간은 네이버 API 기준 08:00 회사 도착, 18:00 회사 출발 시나리오를 바탕으로 실시간 교통정보를 반영하여 계산됩니다.</p>
+              </div>
             </div>
           </div>
 
@@ -424,9 +427,10 @@ function App() {
 
   const handleSearch = async () => {
     if (!inputs.user1.workplace) { alert("나의 직장 위치를 선택해 주세요."); return; }
-    setLoading(true);
-    setLoadingMessage("수도권 3만 개 단지 분석 중...");
     
+    const sleep = (ms) => new Promise(res => setTimeout(ms > 0 ? res : res(), ms));
+    
+    setLoading(true);
     try {
       const loc1 = inputs.user1.workplace;
       const loc2 = mode === 'couple' ? inputs.user2.workplace : null;
@@ -434,23 +438,33 @@ function App() {
       
       const areaMap = { all: [40, 200], '2': [40, 60], '3': [60, 85], '4': [85, 200] };
       const [minArea, maxArea] = areaMap[roomType] || areaMap.all;
-      
-      // 단계별 메시지 (비동기 처리 중간에 섞어줌)
       const payload = { mode, resident_type: residentType, housing_ratio: housingRatio, min_area: minArea, max_area: maxArea, max_building_age: buildingAge, user1: { workplace: loc1, salary: inputs.user1.salary, transport: inputs.user1.transport }, user2: loc2 ? { workplace: loc2, salary: inputs.user2.salary, transport: inputs.user2.transport } : null };
-      
-      setLoadingMessage("최적 후보 100개 추출 완료");
-      // 인위적인 딜레이가 아닌, 실제 다음 단계 전환 시 메시지 변경
-      const fetchResponse = fetch(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      
-      setTimeout(() => setLoadingMessage("네이버 08:00 실시간 교통 분석 중..."), 800);
 
-      const response = await fetchResponse;
+      // 연출된 분석 단계 (Marketing UX)
+      setLoadingMessage("수도권 3만 개 단지 실거래 데이터 필터링 중...");
+      await sleep(800);
+      
+      setLoadingMessage(`${inputs.user1.salary}만원 연봉 기반 최적 예산 구간 산출 완료`);
+      await sleep(600);
+      
+      setLoadingMessage("네이버 08:00 실시간 교통망 시뮬레이션 중...");
+      const fetchPromise = fetch(`${API_BASE_URL}/api/optimize`, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify(payload) 
+      });
+      
+      await sleep(1200);
+      setLoadingMessage("기회비용 및 피로도 가중치 랭킹 산출 중...");
+      
+      const response = await fetchPromise;
       const data = await response.json();
       
-      setLoadingMessage("기회비용 랭킹 산출 중...");
+      await sleep(500);
       setResults(data.results);
       if (data.results?.length > 0) setInputsCollapsed(true);
       if (window.innerWidth < 768) setIsSidebarOpen(false);
+      
       if (data.results?.length > 0) {
         const allPts = [...data.results, loc1];
         if (loc2) allPts.push(loc2);
@@ -460,7 +474,13 @@ function App() {
         setExpandedComplexIdx(0);
         setTimeout(() => { drawCommutePaths(data.results[0], { user1: loc1, user2: loc2 }, mode); }, 600);
       }
-    } catch (err) { console.error(err); alert("분석 중 오류가 발생했습니다."); } finally { setLoading(false); setLoadingMessage(""); }
+    } catch (err) { 
+      console.error(err); 
+      alert("분석 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."); 
+    } finally { 
+      setLoading(false); 
+      setLoadingMessage(""); 
+    }
   };
 
   return (
@@ -626,9 +646,13 @@ function App() {
                 </div>
               </div>
 
-              <button onClick={handleSearch} disabled={loading || !isReady} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3.5 rounded-xl shadow-xl active:scale-[0.98] flex items-center justify-center space-x-2 transition-all">
+              <div className="pt-1 px-1">
+                <p className="text-[9px] font-black text-gray-300">※ 네이버 API 08:00 도착 / 18:00 출발 실시간 교통 반영</p>
+              </div>
+
+              <button onClick={handleSearch} disabled={loading || !isReady} className="w-full bg-gray-900 hover:bg-black text-white font-black py-4 rounded-xl shadow-xl active:scale-[0.98] flex items-center justify-center space-x-2 transition-all">
                 {loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} strokeWidth={3} />}
-                <span className="text-[14px]">스마트 주거 탐색 시작</span>
+                <span>스마트 주거 탐색 시작</span>
               </button>
             </div>
             )}

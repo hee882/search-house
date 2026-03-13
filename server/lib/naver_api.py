@@ -20,7 +20,6 @@ def get_precise_commute(db_path, from_lat, from_lng, to_lat, to_lng, transport_m
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        # 좌표 반올림으로 캐시 히트율 향상 (소수점 4자리: 약 11m 오차)
         f_lat, f_lng = round(from_lat, 4), round(from_lng, 4)
         t_lat, t_lng = round(to_lat, 4), round(to_lng, 4)
         
@@ -45,16 +44,22 @@ def get_precise_commute(db_path, from_lat, from_lng, to_lat, to_lng, transport_m
                 "X-NCP-APIGW-API-KEY-ID": NAVER_CLIENT_ID,
                 "X-NCP-APIGW-API-KEY": NAVER_CLIENT_SECRET
             }
+            
+            # 현실적인 통근 시간 시뮬레이션 (출근 07:30 출발 기준)
+            # 네이버 API 형식: YYYY-MM-DDTHH:mm:ss
+            now = datetime.now()
+            departure_time = now.replace(hour=7, minute=30, second=0, microsecond=0).isoformat()
+            
             params = {
                 "start": f"{from_lng},{from_lat}",
                 "goal": f"{to_lng},{to_lat}",
-                "option": "trafast" # 최적 경로
+                "option": "trafast",
+                "departure_time": departure_time # 실시간 교통정보 반영
             }
             try:
                 res = requests.get(url, headers=headers, params=params, timeout=3)
                 data = res.json()
                 if data.get('code') == 0:
-                    # 네이버는 밀리초 단위 duration 반환
                     duration = int(data['route']['trafast'][0]['summary']['duration'] / 60000)
                     distance = data['route']['trafast'][0]['summary']['distance'] / 1000 # km
             except Exception as e:
