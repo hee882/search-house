@@ -68,6 +68,9 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
   const dropdownRef = useRef(null);
   const listRef = useRef(null);
 
+  // 모바일 여부 확인
+  const isMobile = window.innerWidth < 768;
+
   const filteredStations = useMemo(() => {
     if (!keyword || keyword === value?.name) return stations.slice(0, 5);
     const kw = keyword.trim();
@@ -94,7 +97,7 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
         };
         return score(b) - score(a);
       })
-      .slice(0, 10);
+      .slice(0, 15); // 모바일 가독성을 위해 더 많은 결과 노출
   }, [keyword, stations, value]);
 
   const handleSelect = (station) => {
@@ -140,40 +143,65 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
   }, []);
 
   return (
-    <div className="relative group w-full" ref={dropdownRef}>
-      {IconComponent && <IconComponent className={`absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-300 group-focus-within:${colorClass} transition-colors`} />}
-      <input
-        type="text" value={keyword}
-        onChange={(e) => { setKeyword(e.target.value); setIsOpen(true); setSelectedIndex(0); }}
-        onFocus={() => setIsOpen(true)}
-        onKeyDown={handleKeyDown}
-        className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-transparent rounded-xl text-[13px] font-black focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-gray-300"
-        placeholder={placeholder}
-      />
+    <div className={`relative group w-full ${isOpen && isMobile ? 'z-[9999]' : ''}`} ref={dropdownRef}>
+      <div className={`flex items-center relative transition-all duration-300 ${isOpen && isMobile ? 'fixed top-0 inset-x-0 p-4 bg-white shadow-xl z-[10000]' : ''}`}>
+        {IconComponent && <IconComponent className={`absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-300 group-focus-within:${colorClass} transition-colors ${isOpen && isMobile ? 'left-8' : ''}`} />}
+        <input
+          type="text" value={keyword}
+          onChange={(e) => { setKeyword(e.target.value); setIsOpen(true); setSelectedIndex(0); }}
+          onFocus={() => setIsOpen(true)}
+          onKeyDown={handleKeyDown}
+          className={`w-full pl-10 pr-10 py-3 bg-gray-50 border-none rounded-xl text-[14px] font-black focus:ring-2 focus:ring-blue-500/20 outline-none transition-all placeholder:text-gray-300 ${isOpen && isMobile ? 'pl-14 py-4 text-[16px] bg-gray-100 rounded-2xl' : ''}`}
+          placeholder={placeholder}
+        />
+        {(keyword || (isOpen && isMobile)) && (
+          <button 
+            onClick={() => { setKeyword(""); if(isMobile) setIsOpen(false); }}
+            className={`absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600 rounded-full bg-gray-200/50 ${isOpen && isMobile ? 'right-8' : ''}`}
+          >
+            <X size={14} strokeWidth={3} />
+          </button>
+        )}
+      </div>
+
       {isOpen && (
-        <div className="absolute bottom-full md:bottom-auto md:top-full left-0 w-full mb-2 md:mt-1.5 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 z-[2000] overflow-hidden">
-          <div className="px-4 py-1.5 bg-gray-50/50 text-[9px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 text-center flex justify-between items-center">
+        <div className={`absolute left-0 w-full mb-2 md:mt-1.5 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 z-[2000] overflow-hidden transition-all duration-300
+          ${isMobile 
+            ? 'fixed inset-0 top-[72px] rounded-none border-none shadow-none z-[9999]' 
+            : 'absolute top-full'
+          }
+        `}>
+          <div className="px-4 py-3 bg-gray-50/50 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 flex justify-between items-center">
             <span>{stationLoading ? '데이터 로딩 중...' : (!keyword ? '주요 거점 추천' : '검색 결과')}</span>
             {stationError && <button onClick={onRetry} className="text-blue-600 hover:underline">재시도</button>}
           </div>
           {stationLoading ? (
-            <div className="p-8 flex justify-center"><Loader2 className="animate-spin text-blue-500" size={20} /></div>
+            <div className="p-12 flex flex-col items-center gap-4">
+              <Loader2 className="animate-spin text-blue-500" size={32} />
+              <p className="text-[12px] font-bold text-gray-400">전국 지하철역 매핑 중...</p>
+            </div>
           ) : (
-            <div ref={listRef} className="max-h-[300px] overflow-y-auto custom-scrollbar">
-              {filteredStations.map((s, i) => (
-                <button key={i} onClick={() => handleSelect(s)} onMouseEnter={() => setSelectedIndex(i)} className={`w-full text-left px-4 py-3 flex items-center gap-4 transition-all duration-200 ${selectedIndex === i ? 'bg-blue-50/80 border-l-[4px] border-blue-500 pl-3' : 'text-gray-600 border-b border-gray-50 last:border-0'}`}>
-                  <div className={`shrink-0 p-2 rounded-xl transition-colors ${selectedIndex === i ? 'bg-white shadow-sm' : 'bg-gray-100'}`}>
-                    <Train className={`h-4 w-4 ${selectedIndex === i ? 'text-blue-500' : 'text-gray-400'}`} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className={`text-[15px] font-black tracking-tight truncate ${selectedIndex === i ? 'text-blue-700' : 'text-gray-800'}`}>
-                      {s.name}
-                      {STATION_ALIASES[s.name] && <span className="ml-1.5 text-[12px] font-bold text-gray-400">({STATION_ALIASES[s.name][0].replace('역', '')})</span>}
+            <div ref={listRef} className={`overflow-y-auto custom-scrollbar ${isMobile ? 'h-[calc(100%-40px)] pb-20' : 'max-h-[350px]'}`}>
+              {filteredStations.length > 0 ? (
+                filteredStations.map((s, i) => (
+                  <button key={i} onClick={() => handleSelect(s)} onMouseEnter={() => setSelectedIndex(i)} className={`w-full text-left px-6 py-4.5 flex items-center gap-5 transition-all duration-200 ${selectedIndex === i ? 'bg-blue-50/80 border-l-[6px] border-blue-500 pl-4.5' : 'text-gray-600 border-b border-gray-50 last:border-0'}`}>
+                    <div className={`shrink-0 p-2.5 rounded-2xl transition-colors ${selectedIndex === i ? 'bg-white shadow-md' : 'bg-gray-100'}`}>
+                      <Train className={`h-5 w-5 ${selectedIndex === i ? 'text-blue-500' : 'text-gray-400'}`} />
                     </div>
-                    <div className="mt-1 flex items-center gap-2 overflow-x-auto no-scrollbar"><LineBadge line={s.line} /></div>
-                  </div>
-                </button>
-              ))}
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-[16px] font-black tracking-tight truncate ${selectedIndex === i ? 'text-blue-700' : 'text-gray-800'}`}>
+                        {s.name}
+                        {STATION_ALIASES[s.name] && <span className="ml-2 text-[13px] font-bold text-gray-400">({STATION_ALIASES[s.name][0].replace('역', '')})</span>}
+                      </div>
+                      <div className="mt-1.5 flex items-center gap-2 overflow-x-auto no-scrollbar"><LineBadge line={s.line} /></div>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="p-20 text-center">
+                  <p className="text-[14px] font-black text-gray-300">검색 결과가 없습니다.</p>
+                </div>
+              )}
             </div>
           )}
         </div>
