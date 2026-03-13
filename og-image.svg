@@ -19,68 +19,68 @@
     </linearGradient>
   </defs>
 
-  <!-- 1. 배경 설정 -->
+  <!-- 1. 배경 -->
   <rect width="1200" height="630" fill="url(#bg-grad)" />
-  <circle cx="900" cy="150" r="400" fill="url(#glow-blue)" />
-  <circle cx="100" cy="500" r="300" fill="url(#glow-blue)" opacity="0.5" />
+  <circle cx="950" cy="100" r="450" fill="url(#glow-blue)" />
+  <circle cx="100" cy="550" r="350" fill="url(#glow-blue)" opacity="0.6" />
 
-  <!-- 2. 공식 로고 (logo.svg 정밀 복제) -->
-  <g transform="translate(80, 70) scale(0.8)">
+  <!-- 2. 공식 로고 -->
+  <g transform="translate(80, 60) scale(0.85)">
     <path d="M64 16L16 64H28V108C28 112.418 31.5817 116 36 116H92C96.4183 116 100 112.418 100 108V64H112L64 16Z" fill="url(#house-grad)"/>
     <path d="M52 116V76H76V116" fill="white" opacity="0.2"/>
     <circle cx="80" cy="80" r="28" fill="#F59E0B" stroke="white" stroke-width="6"/>
     <rect x="96" y="96" width="10" height="28" rx="5" transform="rotate(-45 96 96)" fill="#F59E0B" stroke="white" stroke-width="4"/>
-    <text x="135" y="75" font-family="sans-serif" font-size="42" font-weight="900" fill="white" letter-spacing="2">SEARCH HOUSE</text>
-    <text x="135" y="110" font-family="sans-serif" font-size="18" font-weight="700" fill="#64748b" letter-spacing="4" text-transform="uppercase">The Smart Living Guide</text>
+    <text x="135" y="75" font-family="sans-serif" font-size="44" font-weight="900" fill="white" letter-spacing="2">SEARCH HOUSE</text>
+    <text x="135" y="110" font-family="sans-serif" font-size="20" font-weight="700" fill="#64748b" letter-spacing="4" text-transform="uppercase">The Smart Living Guide</text>
   </g>
 
-  <!-- 3. 메인 메시지 영역 (여백 확보 및 겹침 방지) -->
-  <g transform="translate(80, 240)">
-    <text font-family="sans-serif" font-size="42" font-weight="700" fill="#94a3b8">
+  <!-- 3. 메인 메시지 영역 -->
+  <g transform="translate(80, 230)">
+    <text font-family="sans-serif" font-size="44" font-weight="700" fill="#94a3b8">
       매일 왕복 2시간 통근 시
     </text>
-    <text y="100" font-family="sans-serif" font-size="92" font-weight="900" fill="white" letter-spacing="-3">
+    <text y="105" font-family="sans-serif" font-size="96" font-weight="900" fill="white" letter-spacing="-3">
       내 시간 가치는 <tspan fill="#3b82f6">월 100만원</tspan>
     </text>
   </g>
 
-  <!-- 4. 하단 기능 카드 (깔끔한 그리드) -->
-  <g transform="translate(80, 420)">
-    <rect width="1040" height="140" rx="30" fill="white" opacity="0.03" stroke="white" stroke-opacity="0.05" stroke-width="1"/>
+  <!-- 4. 하단 기능 카드 (텍스트 크기 확대) -->
+  <g transform="translate(80, 410)">
+    <rect width="1040" height="160" rx="35" fill="white" opacity="0.04" stroke="white" stroke-opacity="0.08" stroke-width="1.5"/>
     
     <!-- Item 1 -->
-    <g transform="translate(40, 45)">
-      <circle cx="15" cy="25" r="15" fill="#3b82f6" fill-opacity="0.2"/>
-      <path d="M15 18 L15 32 M8 25 L22 25" stroke="#3b82f6" stroke-width="3" stroke-linecap="round"/>
-      <text x="45" y="22" font-family="sans-serif" font-size="18" font-weight="800" fill="white">인생 시급 분석</text>
-      <text x="45" y="45" font-family="sans-serif" font-size="14" font-weight="600" fill="#64748b">나의 시간당 가치 실시간 환산</text>
+    <g transform="translate(45, 50)">
+      <circle cx="20" cy="30" r="20" fill="#3b82f6" fill-opacity="0.2"/>
+      <path d="M20 20 L20 40 M10 30 L30 30" stroke="#3b82f6" stroke-width="4" stroke-linecap="round"/>
+      <text x="55" y="25" font-family="sans-serif" font-size="22" font-weight="900" fill="white">인생 시급 분석</text>
+      <text x="55" y="55" font-family="sans-serif" font-size="17" font-weight="700" fill="#94a3b8">나의 시간당 가치 환산</text>
     </g>
 
     <!-- Divider -->
-    <line x1="340" y1="40" x2="340" y2="100" stroke="white" stroke-opacity="0.1" stroke-width="1"/>
+    <line x1="340" y1="40" x2="340" y2="120" stroke="white" stroke-opacity="0.1" stroke-width="1.5"/>
 
     <!-- Item 2 -->
-    <g transform="translate(380, 45)">
-      <circle cx="15" cy="25" r="15" fill="#10b981" fill-opacity="0.2"/>
-      <path d="M10 25 L14 29 L22 21" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-      <text x="45" y="22" font-family="sans-serif" font-size="18" font-weight="800" fill="white">08:00 도착 시뮬레이션</text>
-      <text x="45" y="45" font-family="sans-serif" font-size="14" font-weight="600" fill="#64748b">네이버 실시간 교통 정보 반영</text>
+    <g transform="translate(385, 50)">
+      <circle cx="20" cy="30" r="20" fill="#10b981" fill-opacity="0.2"/>
+      <path d="M13 30 L18 35 L27 25" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <text x="55" y="25" font-family="sans-serif" font-size="22" font-weight="900" fill="white">08:00 도착 시뮬레이션</text>
+      <text x="55" y="55" font-family="sans-serif" font-size="17" font-weight="700" fill="#94a3b8">네이버 실시간 교통 반영</text>
     </g>
 
     <!-- Divider -->
-    <line x1="700" y1="40" x2="700" y2="100" stroke="white" stroke-opacity="0.1" stroke-width="1"/>
+    <line x1="700" y1="40" x2="700" y2="120" stroke="white" stroke-opacity="0.1" stroke-width="1.5"/>
 
     <!-- Item 3 -->
-    <g transform="translate(740, 45)">
-      <circle cx="15" cy="25" r="15" fill="#f59e0b" fill-opacity="0.2"/>
-      <rect x="10" y="18" width="10" height="14" rx="2" stroke="#f59e0b" stroke-width="2" fill="none"/>
-      <text x="45" y="22" font-family="sans-serif" font-size="18" font-weight="800" fill="white">최적 입지 스캐닝</text>
-      <text x="45" y="45" font-family="sans-serif" font-size="14" font-weight="600" fill="#64748b">수도권 620개 역세권 전수 조사</text>
+    <g transform="translate(745, 50)">
+      <circle cx="20" cy="30" r="20" fill="#f59e0b" fill-opacity="0.2"/>
+      <rect x="13" y="23" width="14" height="14" rx="2" stroke="#f59e0b" stroke-width="3" fill="none"/>
+      <text x="55" y="25" font-family="sans-serif" font-size="22" font-weight="900" fill="white">최적 입지 스캐닝</text>
+      <text x="55" y="55" font-family="sans-serif" font-size="17" font-weight="700" fill="#94a3b8">수도권 620개 역세권 분석</text>
     </g>
   </g>
 
-  <!-- 5. 푸터 (신뢰도 데이터) -->
-  <text x="120" y="605" font-family="sans-serif" font-size="15" font-weight="600" fill="#475569">
-    본 서비스는 국토교통부 실거래가 공식 API 데이터를 사용합니다.
+  <!-- 5. 푸터 -->
+  <text x="125" y="610" font-family="sans-serif" font-size="16" font-weight="700" fill="#475569">
+    데이터 출처: 국토교통부 실거래가 공식 API
   </text>
 </svg>
