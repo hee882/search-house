@@ -55,10 +55,8 @@ const STATION_ALIASES = {
 
 const getNaverLandUrl = (name) => {
   const q = encodeURIComponent((name || '').trim());
-  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  return isMobile
-    ? `https://m.land.naver.com/search?query=${q}`
-    : `https://fin.land.naver.com/search?query=${q}`;
+  // 최신 네이버 부동산 통합 검색 경로 (가장 안정적)
+  return `https://fin.land.naver.com/search?query=${q}`;
 };
 
 function StationSearch({ value, onChange, placeholder, stations, icon: IconComponent, colorClass, stationLoading, stationError, onRetry }) {
@@ -334,9 +332,17 @@ function App() {
       const p2 = drawPolyline(map, [{ lat: spot.lat, lng: spot.lng }, { lat: workplaceLocs.user2.lat, lng: workplaceLocs.user2.lng }], { color: '#EC4899', style: 'dashed', weight: 5 });
       if (p2) pathsRef.current.push(p2);
     }
-    const padding = { left: window.innerWidth >= 768 && isSidebarOpen ? 460 : 60, right: 60, top: 60, bottom: 60 };
+    
+    // 사이드바 영역을 고려한 패딩 적용 (데스크탑 460px)
+    const isDesktop = window.innerWidth >= 768;
+    const padding = { 
+      left: isDesktop ? 460 : 40, 
+      right: 40, 
+      top: 100, 
+      bottom: 100 
+    };
     setBounds(map, pts, padding);
-  }, [map, isSidebarOpen]);
+  }, [map]);
 
   const handleSpotClick = useCallback((spot, index) => {
     const isAlreadyExpanded = expandedSpotIndex === index;
@@ -344,20 +350,24 @@ function App() {
     setExpandedComplexIdx(0);
     if (!isAlreadyExpanded) {
       drawCommutePaths(spot, workplaceLocs, mode);
-      if (window.innerWidth < 768) {
-        setMobileSheetState('hidden');
-        setCenter(map, { lat: spot.lat, lng: spot.lng });
-      }
+      if (window.innerWidth < 768) setMobileSheetState('hidden');
     } else {
       pathsRef.current.forEach(p => p.setMap(null));
       pathsRef.current = [];
       const allPts = [...results, workplaceLocs.user1];
       if (workplaceLocs.user2) allPts.push(workplaceLocs.user2);
-      const padding = { left: window.innerWidth >= 768 && isSidebarOpen ? 460 : 60, right: 60, top: 60, bottom: 60 };
+      
+      const isDesktop = window.innerWidth >= 768;
+      const padding = { 
+        left: isDesktop ? 460 : 40, 
+        right: 40, 
+        top: 100, 
+        bottom: 100 
+      };
       setBounds(map, allPts, padding);
       setTimeout(() => { const currentZoom = getZoom(map); setZoom(map, currentZoom - 2); }, 300);
     }
-  }, [expandedSpotIndex, workplaceLocs, mode, drawCommutePaths, results, map, isSidebarOpen]);
+  }, [expandedSpotIndex, workplaceLocs, mode, drawCommutePaths, results, map]);
 
   useEffect(() => {
     if (!map || !isReady) return;

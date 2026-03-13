@@ -403,9 +403,9 @@ async def optimize_location(request: OptimizeRequest):
                 "dist_from_mid": dist_from_mid, "avg_deposit": avg_deposit, "avg_rent": avg_rent
             })
 
-        # 직장 중심점에서 가까운 순으로 20개 후보군 정밀 분석 (비용 최적화)
+        # 직장 중심점에서 가까운 순으로 50개 후보군 정밀 분석 (후보군 확대)
         candidates.sort(key=lambda x: x['dist_from_mid'])
-        top_candidates = candidates[:20]
+        top_candidates = candidates[:50]
 
         results = []
         for spot in top_candidates:
@@ -416,7 +416,7 @@ async def optimize_location(request: OptimizeRequest):
             if request.mode == 'couple' and request.user2:
                 time2, dist2 = get_precise_commute(DB_PATH, spot['lat'], spot['lng'], request.user2.workplace.lat, request.user2.workplace.lng, request.user2.transport)
             
-            # 비용 계산 로직: 정밀 시간 반영
+            # 비용 계산 로직: 정밀 시간 및 피로도 반영
             base_transport_cost = 10
             hidden_cost1 = calculate_hidden_life_cost(request.user1.salary, time1)
             hidden_cost2 = calculate_hidden_life_cost(request.user2.salary if request.user2 else 0, time2)
@@ -436,6 +436,7 @@ async def optimize_location(request: OptimizeRequest):
                 "score": total_opp_cost
             })
 
+        # 최종 가성비 순으로 정렬
         results.sort(key=lambda x: x['score'])
         return {"results": results[:5]}
     except Exception as e:
