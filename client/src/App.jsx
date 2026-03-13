@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, Coffee, ShieldCheck, Map as MapIcon, List, Settings2, Pencil, Train, X } from 'lucide-react';
+import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, ShieldCheck, List, Settings2, Train, X, HelpCircle, DollarSign, Home, Calculator, TrendingUp, AlertTriangle } from 'lucide-react';
 import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds, getZoom, setZoom } from './lib/map';
 
 // 지하철 호선별 공식 색상
@@ -109,18 +109,41 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
     setSelectedIndex(-1);
   };
 
+  const listRef = useRef(null);
+  const handleKeyDown = (e) => {
+    if (!isOpen) { if (e.key === 'ArrowDown' || e.key === 'Enter') { setIsOpen(true); setSelectedIndex(0); } return; }
+    const list = filteredStations;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedIndex(prev => {
+        const next = Math.min(prev + 1, list.length - 1);
+        requestAnimationFrame(() => listRef.current?.children[next + 1]?.scrollIntoView({ block: 'nearest' }));
+        return next;
+      });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedIndex(prev => {
+        const next = Math.max(prev - 1, 0);
+        requestAnimationFrame(() => listRef.current?.children[next + 1]?.scrollIntoView({ block: 'nearest' }));
+        return next;
+      });
+    } else if ((e.key === 'Enter' || e.key === 'Tab') && selectedIndex >= 0 && list[selectedIndex]) { e.preventDefault(); handleSelect(list[selectedIndex]); }
+    else if (e.key === 'Escape') { setIsOpen(false); setSelectedIndex(-1); }
+  };
+
   return (
     <div className="relative group w-full" ref={dropdownRef}>
       {IconComponent && <IconComponent className={`absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-300 group-focus-within:${colorClass} transition-colors`} />}
       <input
         type="text" value={keyword}
-        onChange={(e) => { setKeyword(e.target.value); setIsOpen(true); }}
+        onChange={(e) => { setKeyword(e.target.value); setIsOpen(true); setSelectedIndex(0); }}
         onFocus={() => setIsOpen(true)}
+        onKeyDown={handleKeyDown}
         className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-transparent rounded-xl text-[13px] font-black focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-gray-300"
         placeholder={placeholder}
       />
       {isOpen && (stationLoading || stationError || filteredStations.length > 0) && (
-        <div className="absolute bottom-full md:bottom-auto md:top-full left-0 w-full mb-2 md:mt-1.5 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 z-[2000] overflow-hidden">
+        <div ref={listRef} className="absolute bottom-full md:bottom-auto md:top-full left-0 w-full mb-2 md:mt-1.5 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 z-[2000] overflow-hidden max-h-[50vh] overflow-y-auto">
           {stationLoading ? (
             <div className="px-4 py-6 text-center"><Loader2 className="animate-spin mx-auto mb-2 text-blue-400" size={20} /><div className="text-[11px] font-bold text-gray-400">역 데이터 로딩 중...</div></div>
           ) : stationError ? (
@@ -158,6 +181,124 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
   );
 }
 
+function HelpModal({ isOpen, onClose }) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-end md:items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div className="relative bg-white w-full md:w-[480px] md:max-h-[85vh] max-h-[90vh] md:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white z-10 px-6 pt-5 pb-3 border-b border-gray-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <HelpCircle size={18} className="text-blue-600" />
+            <span className="text-[15px] font-black tracking-tight">사용 가이드</span>
+          </div>
+          <button onClick={onClose} className="p-1.5 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors"><X size={16} /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+          {/* Section 1: 서비스 개념 */}
+          <div>
+            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><TrendingUp size={14} className="text-blue-600" /> 이 서비스는 무엇인가요?</h3>
+            <p className="text-[11px] font-bold text-gray-500 leading-relaxed">
+              <span className="text-gray-900 font-black">Search House</span>는 단순 집값 비교가 아닌, <span className="text-orange-600 font-black">통근 시간의 기회비용</span>까지 포함한 <span className="text-blue-600 font-black">진짜 주거 비용</span>을 계산하여 최적 입지를 추천합니다.
+            </p>
+            <div className="mt-2 bg-orange-50 rounded-xl p-3 border border-orange-100">
+              <p className="text-[10px] font-black text-orange-700 leading-relaxed">
+                <AlertTriangle size={11} className="inline mr-1" />
+                매일 왕복 2시간 출퇴근 = 연간 <span className="text-orange-900">480시간</span> = <span className="text-orange-900">20일</span>을 도로 위에서 소비합니다. 그 시간을 당신의 시급으로 환산하면?
+              </p>
+            </div>
+          </div>
+
+          {/* Section 2: 사용 방법 */}
+          <div>
+            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><Search size={14} className="text-blue-600" /> 사용 방법</h3>
+            <div className="space-y-2">
+              {[
+                ['1', '직장 근처 역을 검색하여 선택하세요', '초성 검색 지원 (ㄱㄴ → 강남역)'],
+                ['2', '연봉과 이동 수단을 입력하세요', '커플 모드는 두 사람 모두 입력'],
+                ['3', '소득 대비 주거비 비율을 설정하세요', '10%~40% 중 선택, 월 예산이 자동 계산'],
+                ['4', '방 타입과 준공 연수를 선택하세요', '면적 기준: 2룸(40~60m²), 3룸(60~85m²), 4룸+(85m²~)'],
+                ['5', '스마트 주거 탐색 시작!', '결과 카드를 클릭하면 지도에서 통근 경로를 확인'],
+              ].map(([step, title, desc]) => (
+                <div key={step} className="flex gap-2.5 items-start">
+                  <div className="w-5 h-5 bg-blue-600 rounded-lg flex items-center justify-center shrink-0 mt-0.5"><span className="text-[10px] font-black text-white">{step}</span></div>
+                  <div><div className="text-[11px] font-black text-gray-700">{title}</div><div className="text-[10px] font-bold text-gray-400">{desc}</div></div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Section 3: 핵심 산식 */}
+          <div>
+            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><Calculator size={14} className="text-blue-600" /> 비용 산출 방식</h3>
+            <div className="space-y-2.5">
+              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                <div className="text-[10px] font-black text-blue-600 uppercase mb-1">월 주거비</div>
+                <div className="text-[11px] font-black text-gray-800 font-mono">(보증금 × 4% ÷ 12) + 월세</div>
+                <div className="text-[9px] font-bold text-gray-400 mt-1">보증금의 연 4% 이자를 기회비용으로 반영</div>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                <div className="text-[10px] font-black text-orange-600 uppercase mb-1">숨은 생활비 (통근 기회비용)</div>
+                <div className="text-[11px] font-black text-gray-800 font-mono">(연봉 ÷ 12 ÷ 209h ÷ 60min) × 통근분 × 2회 × 20일</div>
+                <div className="text-[9px] font-bold text-gray-400 mt-1">당신의 인생 시급을 기준으로 매일 왕복 통근의 실질 가치</div>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                <div className="text-[10px] font-black text-red-500 uppercase mb-1">피로도 가중치 (Fatigue Model)</div>
+                <div className="text-[11px] font-black text-gray-800">45분 이상: <span className="text-orange-600">×1.15</span> · 60분 이상: <span className="text-red-600">×1.30</span></div>
+                <div className="text-[9px] font-bold text-gray-400 mt-1">장거리 통근은 피로 누적으로 실질 가치 손실이 가중</div>
+              </div>
+              <div className="bg-blue-50 rounded-xl p-3 border border-blue-100">
+                <div className="text-[10px] font-black text-blue-600 uppercase mb-1">총 기회비용</div>
+                <div className="text-[11px] font-black text-gray-800 font-mono">실제 지출(주거비+교통비) + 숨은 비용(시간 가치)</div>
+                <div className="text-[9px] font-bold text-gray-400 mt-1">이 값이 낮은 순서로 최적 입지를 추천합니다</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 4: 주거비 예산 */}
+          <div>
+            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><DollarSign size={14} className="text-blue-600" /> 주거비 한도란?</h3>
+            <p className="text-[11px] font-bold text-gray-500 leading-relaxed">
+              소득 대비 주거비 비율(10%~40%)을 설정하면, <span className="text-gray-900 font-black">월 예산 이내의 단지만</span> 추천합니다. 연봉이 높을수록, 비율이 높을수록 더 좋은 단지가 나타납니다.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <div className="flex-1 bg-gray-50 p-2 rounded-lg text-center border border-gray-100">
+                <div className="text-[9px] font-black text-gray-400">연봉 3000만 × 30%</div>
+                <div className="text-[12px] font-black text-gray-700">월 75만</div>
+              </div>
+              <div className="flex-1 bg-gray-50 p-2 rounded-lg text-center border border-gray-100">
+                <div className="text-[9px] font-black text-gray-400">연봉 5000만 × 30%</div>
+                <div className="text-[12px] font-black text-gray-700">월 125만</div>
+              </div>
+              <div className="flex-1 bg-gray-50 p-2 rounded-lg text-center border border-gray-100">
+                <div className="text-[9px] font-black text-gray-400">연봉 8000만 × 30%</div>
+                <div className="text-[12px] font-black text-gray-700">월 200만</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 5: 데이터 출처 */}
+          <div>
+            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><Home size={14} className="text-blue-600" /> 데이터 안내</h3>
+            <div className="text-[11px] font-bold text-gray-500 leading-relaxed space-y-1">
+              <p>· 실거래가 데이터: <span className="text-gray-900 font-black">국토교통부 공식 API</span> (매일 자동 갱신)</p>
+              <p>· 대상: 수도권 620+ 지하철역 인근 <span className="text-gray-900 font-black">전월세 실거래</span></p>
+              <p>· 거래 5건 이상의 단지만 표시 (통계 신뢰성 확보)</p>
+              <p>· 통근 시간: 직선 거리 기반 추정 (대중교통 20km/h, 자차 30km/h)</p>
+            </div>
+          </div>
+
+          {/* Footer: Marketing */}
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-4 text-center text-white">
+            <div className="text-[14px] font-black mb-1">집은 사는 곳이 아니라, 사는 방식입니다</div>
+            <p className="text-[10px] font-bold text-blue-200 leading-relaxed">당신의 시간, 에너지, 그리고 삶의 질까지 고려한<br/>스마트한 주거 의사결정을 Search House와 함께하세요.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [mapCenter] = useState({ lat: 37.5665, lng: 126.9780 });
   const [zoomLevel] = useState(15);
@@ -180,6 +321,7 @@ function App() {
   const [stationList, setStationList] = useState([]);
   const [stationLoading, setStationLoading] = useState(true);
   const [stationError, setStationError] = useState(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   const mapContainerRef = useRef(null);
   const markersRef = useRef([]);
@@ -334,7 +476,10 @@ function App() {
                 <img src="logo.svg" alt="Logo" className="w-8 h-8 md:w-12 md:h-12" />
                 <span className="text-lg md:text-2xl font-black uppercase tracking-tight">Search House</span>
               </div>
-              <button onClick={() => setIsSidebarOpen(false)} className="p-2 bg-gray-100 rounded-full md:hidden transition-colors active:bg-gray-200"><X size={20} /></button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowHelp(true)} className="p-2 bg-gray-100 rounded-full transition-colors hover:bg-blue-50 active:bg-blue-100" title="사용 가이드"><HelpCircle size={16} className="text-gray-400 hover:text-blue-500" /></button>
+                <button onClick={() => setIsSidebarOpen(false)} className="p-2 bg-gray-100 rounded-full md:hidden transition-colors active:bg-gray-200"><X size={20} /></button>
+              </div>
             </div>
 
             {inputsCollapsed ? (
@@ -548,7 +693,7 @@ function App() {
                   </div>
                   );
                 })}
-                <div className="mt-4 p-6 pb-32 bg-orange-50/50 rounded-[2rem] border border-orange-100 text-center space-y-2">
+                <div className="mt-4 p-6 bg-orange-50/50 rounded-[2rem] border border-orange-100 text-center space-y-2">
                   <div className="text-[20px]">&#9888;&#65039;</div>
                   <h6 className="text-[12px] font-black text-gray-900 leading-tight">"보이지 않는 비용"이 진짜 비용입니다</h6>
                   <p className="text-[10px] font-bold text-gray-500 leading-relaxed">매일 왕복 2시간 통근 = 연간 <span className="text-orange-600 font-black">480시간</span> = <span className="text-orange-600 font-black">20일</span>을 길 위에서 소비합니다.<br/>그 시간의 가치를 당신의 시급으로 환산하면?</p>
@@ -586,12 +731,15 @@ function App() {
       )}
 
       {/* 4. Unified Mobile FAB */}
-      <button 
+      <button
         onClick={() => setIsSidebarOpen(!isSidebarOpen)}
         className="md:hidden absolute bottom-8 right-6 z-[1100] w-14 h-14 bg-gray-900 text-white rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all border-2 border-white/20"
       >
         {isSidebarOpen ? <X size={24} /> : (results ? <List size={24} /> : <Search size={24} />)}
       </button>
+
+      {/* 5. Help Modal */}
+      <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
     </div>
   );
 }

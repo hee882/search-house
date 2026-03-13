@@ -139,7 +139,7 @@ def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0,
             params.append(min_build_year)
         query += '''
             GROUP BY apt_name, dong_name
-            HAVING cnt >= 2
+            HAVING cnt >= 5
             ORDER BY cnt DESC LIMIT 30
         '''
         cursor.execute(query, params)
