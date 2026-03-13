@@ -65,29 +65,32 @@ class OptimizeRequest(BaseModel):
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "server", "data", "search_house.db")
 STATIONS_PATH = os.path.join(BASE_DIR, "server", "data", "stations.json")
+DONG_COORDS_PATH = os.path.join(BASE_DIR, "server", "data", "dong_coordinates.json")
 FRONTEND_DIST = os.path.join(BASE_DIR, "client", "dist")
 
 # --- Global Data ---
 STATIONS_DATA = []
+DONG_COORDS = {}
 
-def load_stations():
-    global STATIONS_DATA
+def load_global_data():
+    global STATIONS_DATA, DONG_COORDS
     try:
         if os.path.exists(STATIONS_PATH):
             with open(STATIONS_PATH, "r", encoding="utf-8") as f:
                 STATIONS_DATA = json.load(f)
-            logger.info(f"Loaded {len(STATIONS_DATA)} stations from {STATIONS_PATH}")
-        else:
-            logger.warning(f"Stations file not found: {STATIONS_PATH}")
-            STATIONS_DATA = []
+            logger.info(f"Loaded {len(STATIONS_DATA)} stations")
+
+        if os.path.exists(DONG_COORDS_PATH):
+            with open(DONG_COORDS_PATH, "r", encoding="utf-8") as f:
+                DONG_COORDS = json.load(f)
+            logger.info(f"Loaded {len(DONG_COORDS)} dong coordinates")
     except Exception as e:
-        logger.error(f"Failed to load stations: {e}")
-        STATIONS_DATA = []
+        logger.error(f"Failed to load global data: {e}")
 
-# Initial load (모듈 레벨 동기 로드)
-load_stations()
+# Initial load
+load_global_data()
 
-@app.on_event("startup")
+# --- Database & Helper Functions ---
 async def startup_event():
     """서버 시작 시 stations 데이터 보장"""
     if not STATIONS_DATA:
@@ -118,7 +121,7 @@ def calculate_hidden_life_cost(salary, commute_minutes):
     elif commute_minutes >= 45: multiplier = 1.15
     return round((base_time_value * multiplier) / 10000)
 
-def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0,
+def get_complexes_with_costs(city_code, station_lat, station_lng, salary1, time1, salary2=0, time2=0,
                              resident_type='rent', max_housing_budget=0,
                              min_area=40, max_area=200, min_build_year=0):
     if not os.path.exists(DB_PATH): return []
@@ -126,7 +129,7 @@ def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0,
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        # 후보 단지를 넉넉히 가져와서 예산 필터링
+        # 후보 단지를 넉넉히 가져와서 예산 및 거리 필터링
         query = '''
             SELECT apt_name, dong_name, AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent, COUNT(*) as cnt
             FROM rent_transactions
@@ -137,10 +140,11 @@ def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0,
         if min_build_year > 0:
             query += ' AND build_year >= ?'
             params.append(min_build_year)
+
         query += '''
             GROUP BY apt_name, dong_name
             HAVING cnt >= 5
-            ORDER BY cnt DESC LIMIT 30
+            ORDER BY cnt DESC LIMIT 50
         '''
         cursor.execute(query, params)
         rows = cursor.fetchall()
@@ -148,8 +152,21 @@ def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0,
 
         candidates = []
         for row in rows:
-            avg_deposit = int(row[2])
-            avg_rent = int(row[3])
+            apt_name, dong_name = row[0], row[1]
+            avg_deposit, avg_rent = int(row[2]), int(row[3])
+
+            # 거리 필터링: 역과 동 좌표 사이의 거리 계산
+            dong_key = f"{city_code}_{dong_name}"
+            walk_time = 0
+            if dong_key in DONG_COORDS:
+                coord = DONG_COORDS[dong_key]
+                dist_to_station = calculate_distance(station_lat, station_lng, coord['lat'], coord['lng'])
+                if dist_to_station > 2.5: continue # 2.5km 초과 단지는 너무 멂
+                walk_time = int(dist_to_station * 12) # 1km당 약 12분 도보 가정
+
+            # 보정된 통근 시간
+            adjusted_time1 = time1 + walk_time
+            adjusted_time2 = time2 + (walk_time if salary2 > 0 else 0)
 
             # 월 주거비용 (보증금 이자 4% 가정 + 월세)
             monthly_housing_cost = round((avg_deposit * 0.04) / 12) + avg_rent
@@ -163,26 +180,22 @@ def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0,
 
             # 억 단위 포맷팅
             if avg_deposit >= 10000:
-                eok = avg_deposit // 10000
-                man = avg_deposit % 10000
+                eok, man = avg_deposit // 10000, avg_deposit % 10000
                 dep_str = f"{eok}억" + (f" {man}만" if man > 0 else "")
             else:
                 dep_str = f"{avg_deposit}만"
 
-            if rent_type == "월세":
-                display_price_value = f"{dep_str} / {avg_rent}만"
-            else:
-                display_price_value = f"{dep_str}"
+            display_price_value = f"{dep_str} / {avg_rent}만" if rent_type == "월세" else dep_str
 
             base_transport_cost = 10
-            hidden_cost1 = calculate_hidden_life_cost(salary1, time1)
-            hidden_cost2 = calculate_hidden_life_cost(salary2, time2) if salary2 > 0 else 0
+            hidden_cost1 = calculate_hidden_life_cost(salary1, adjusted_time1)
+            hidden_cost2 = calculate_hidden_life_cost(salary2, adjusted_time2) if salary2 > 0 else 0
             fixed_monthly_exp = monthly_housing_cost + base_transport_cost
             total_hidden_life_cost = hidden_cost1 + hidden_cost2
             total_opp_cost = fixed_monthly_exp + total_hidden_life_cost
 
             candidates.append({
-                "name": row[0], "dong": row[1],
+                "name": apt_name, "dong": dong_name,
                 "rent_type": rent_type,
                 "deposit": avg_deposit,
                 "monthly_rent": avg_rent,
@@ -191,7 +204,8 @@ def get_complexes_with_costs(city_code, salary1, time1, salary2=0, time2=0,
                 "fixed_monthly_exp": fixed_monthly_exp,
                 "hidden_life_cost": total_hidden_life_cost,
                 "total_opp_cost": total_opp_cost,
-                "housing_cost_only": monthly_housing_cost
+                "housing_cost_only": monthly_housing_cost,
+                "commute_time_total": adjusted_time1 # 대표 시간으로 사용
             })
 
         # 예산 내에서 주거비 높은 순 정렬 (예산 꽉 채운 = 더 좋은 단지)
@@ -346,7 +360,18 @@ async def optimize_location(request: OptimizeRequest):
             time2 = 0
             if request.mode == 'couple' and request.user2:
                 time2 = estimate_commute_time(calculate_distance(spot['lat'], spot['lng'], request.user2.workplace.lat, request.user2.workplace.lng), request.user2.transport)
-            complexes = get_complexes_with_costs(spot.get('city_code', ''), request.user1.salary, time1, request.user2.salary if request.user2 else 0, time2, resident_type=request.resident_type, max_housing_budget=max_housing_budget, min_area=request.min_area, max_area=request.max_area, min_build_year=min_build_year)
+            
+            complexes = get_complexes_with_costs(
+                spot.get('city_code', ''), 
+                spot['lat'], spot['lng'],
+                request.user1.salary, time1, 
+                request.user2.salary if request.user2 else 0, time2, 
+                resident_type=request.resident_type, 
+                max_housing_budget=max_housing_budget,
+                min_area=request.min_area,
+                max_area=request.max_area,
+                min_build_year=min_build_year
+            )
             if not complexes: continue
             representative_cost = complexes[0]['total_opp_cost']
             results.append({
