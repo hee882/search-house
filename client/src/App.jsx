@@ -166,6 +166,7 @@ function App() {
   const [housingRatio, setHousingRatio] = useState(0.25);
   const [roomType, setRoomType] = useState('all');
   const [buildingAge, setBuildingAge] = useState(0);
+  const [inputsCollapsed, setInputsCollapsed] = useState(false);
   const [inputs, setInputs] = useState({
     user1: { workplace: null, salary: 4000, transport: 'public' },
     user2: { workplace: null, salary: 4000, transport: 'public' }
@@ -291,6 +292,7 @@ function App() {
       const response = await fetch(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await response.json();
       setResults(data.results);
+      if (data.results?.length > 0) setInputsCollapsed(true);
       if (window.innerWidth < 768) setIsSidebarOpen(false);
       if (data.results?.length > 0) {
         const allPts = [...data.results, loc1];
@@ -335,6 +337,20 @@ function App() {
               <button onClick={() => setIsSidebarOpen(false)} className="p-2 bg-gray-100 rounded-full md:hidden transition-colors active:bg-gray-200"><X size={20} /></button>
             </div>
 
+            {inputsCollapsed ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-1.5">
+                  <span className="text-[10px] font-black bg-blue-50 text-blue-600 px-2 py-1 rounded-full">{inputs.user1.workplace?.name || '미선택'}</span>
+                  <span className="text-[10px] font-black bg-gray-100 text-gray-500 px-2 py-1 rounded-full">{inputs.user1.salary}만</span>
+                  {mode === 'couple' && <span className="text-[10px] font-black bg-pink-50 text-pink-500 px-2 py-1 rounded-full">{inputs.user2.workplace?.name || ''} {inputs.user2.salary}만</span>}
+                  <span className="text-[10px] font-black bg-gray-100 text-gray-500 px-2 py-1 rounded-full">주거비 {Math.round(housingRatio * 100)}%</span>
+                  <span className="text-[10px] font-black bg-gray-100 text-gray-500 px-2 py-1 rounded-full">{roomType === 'all' ? '전체' : roomType + '룸'}{buildingAge > 0 ? ` · ${buildingAge}년` : ''}</span>
+                </div>
+                <button onClick={() => setInputsCollapsed(false)} className="w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-[11px] font-black text-gray-500 flex items-center justify-center gap-1.5 transition-colors">
+                  <Settings2 size={13} /> 조건 수정
+                </button>
+              </div>
+            ) : (
             <div className="space-y-3 md:space-y-4">
               <div className="bg-blue-50/80 p-3 rounded-xl border border-blue-100 shadow-sm hidden md:block">
                 <div className="flex items-center space-x-2 text-blue-600 mb-1">
@@ -434,63 +450,108 @@ function App() {
                 <span className="text-[14px]">스마트 주거 탐색 시작</span>
               </button>
             </div>
+            )}
           </div>
 
           {/* Results Area - Scrollable within sidebar */}
-          <div className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar space-y-4 border-t border-gray-50 bg-gray-50/30 pb-32">
+          <div className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar space-y-3 border-t border-gray-50 bg-gray-50/30 pb-32">
             {results ? (
               <>
-                <div className="flex items-center justify-between px-1 mb-2">
+                <div className="flex items-center justify-between px-1 mb-1">
                   <h5 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">최적 생존 입지 <span className="ml-1 text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full text-[9px]">{results.length}</span></h5>
                   <div className="flex items-center space-x-1 text-[9px] font-bold text-blue-500"><Zap size={11} className="fill-blue-500" /> <span>Al-Driven</span></div>
                 </div>
-                {results.map((spot, i) => (
-                  <div key={i} className={`transition-all rounded-[1.5rem] border overflow-hidden ${expandedSpotIndex === i ? 'bg-white border-blue-200 shadow-xl ring-1 ring-blue-100 scale-[1.01]' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
-                    <button onClick={() => handleSpotClick(spot, i)} className="w-full p-4 text-left flex justify-between items-center">
-                      <div className="flex items-center space-x-3">
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black ${i === 0 ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-400'}`}>{i === 0 ? <Trophy size={16} /> : i + 1}</div>
-                        <div>
-                          <div className="text-[9px] font-black text-blue-500 uppercase tracking-tighter mb-0.5">{spot.name} 인근</div>
-                          <h6 className="text-[15px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[160px]">{spot.complexes[0]?.name}</h6>
+                {results.map((spot, i) => {
+                  const topApt = spot.complexes[0];
+                  return (
+                  <div key={i} className={`transition-all rounded-[1.5rem] border overflow-hidden ${expandedSpotIndex === i ? 'bg-white border-blue-200 shadow-xl ring-1 ring-blue-100' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
+                    {/* Card Header - Always visible */}
+                    <button onClick={() => handleSpotClick(spot, i)} className="w-full p-4 pb-3 text-left">
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex items-center space-x-3">
+                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${i === 0 ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-400'}`}>{i === 0 ? <Trophy size={16} /> : i + 1}</div>
+                          <div>
+                            <div className="text-[9px] font-black text-blue-500 uppercase tracking-tighter mb-0.5">{spot.name} 인근</div>
+                            <h6 className="text-[14px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[180px]">{topApt?.name}</h6>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0 ml-2">
+                          <div className="text-[8px] font-black text-gray-300 uppercase mb-0.5">{topApt?.display_price_label}</div>
+                          <div className="text-[12px] font-black text-gray-700 tracking-tight">{topApt?.display_price_value}</div>
                         </div>
                       </div>
-                      <div className="text-right ml-2">
-                        <div className="text-[8px] font-black text-gray-300 uppercase mb-0.5 whitespace-nowrap">총 손실 비용</div>
-                        <div className="text-[16px] font-black text-gray-900 tracking-tighter leading-none whitespace-nowrap">월 {spot.total_cost}만</div>
+                      {/* Cost comparison - the marketing hook */}
+                      <div className="flex gap-2">
+                        <div className="flex-1 bg-gray-50 rounded-xl p-2.5 text-center border border-gray-100">
+                          <div className="text-[8px] font-black text-gray-400 uppercase mb-1">실제 지출</div>
+                          <div className="text-[18px] font-black text-gray-900 tracking-tighter leading-none">{topApt?.fixed_monthly_exp}<span className="text-[11px] text-gray-400 ml-0.5">만</span></div>
+                          <div className="text-[8px] font-bold text-gray-300 mt-0.5">주거비 + 교통비</div>
+                        </div>
+                        <div className="flex-1 bg-orange-50 rounded-xl p-2.5 text-center border border-orange-100">
+                          <div className="text-[8px] font-black text-orange-500 uppercase mb-1">보이지 않는 비용</div>
+                          <div className="text-[18px] font-black text-orange-600 tracking-tighter leading-none">{topApt?.hidden_life_cost}<span className="text-[11px] text-orange-400 ml-0.5">만</span></div>
+                          <div className="text-[8px] font-bold text-orange-300 mt-0.5">당신의 시간 가치</div>
+                        </div>
+                      </div>
+                      {/* Commute badges */}
+                      <div className="flex items-center gap-2 mt-2.5">
+                        <div className="flex items-center gap-1 bg-blue-50 px-2 py-1 rounded-lg">
+                          {inputs.user1.transport === 'car' ? <Car size={10} className="text-blue-500" /> : <Bus size={10} className="text-blue-500" />}
+                          <span className="text-[10px] font-black text-blue-600">{spot.commute_time_1}분</span>
+                        </div>
+                        {mode === 'couple' && spot.commute_time_2 > 0 && (
+                          <div className="flex items-center gap-1 bg-pink-50 px-2 py-1 rounded-lg">
+                            {inputs.user2.transport === 'car' ? <Car size={10} className="text-pink-500" /> : <Bus size={10} className="text-pink-500" />}
+                            <span className="text-[10px] font-black text-pink-600">{spot.commute_time_2}분</span>
+                          </div>
+                        )}
+                        <div className="ml-auto text-[9px] font-black text-gray-300">월 총 {spot.total_cost}만 손실</div>
+                        <ChevronDown size={14} className={`text-gray-300 transition-transform ${expandedSpotIndex === i ? 'rotate-180' : ''}`} />
                       </div>
                     </button>
+
+                    {/* Expanded Detail */}
                     {expandedSpotIndex === i && (
-                      <div className="px-4 pb-5 animate-in slide-in-from-top-4 duration-500">
-                        <div className="h-px bg-gray-100 mb-4" />
-                        <div className="space-y-2 mb-5">
-                          {spot.complexes.map((apt, idx) => (
-                            <div key={idx} onClick={() => setExpandedComplexIdx(idx)} className={`p-3 rounded-xl border transition-all cursor-pointer ${expandedComplexIdx === idx ? 'bg-blue-50 border-blue-200 shadow-sm' : 'bg-gray-50 border-transparent'}`}>
-                              <div className="flex justify-between items-center mb-0.5 gap-2">
-                                <div className="flex items-center space-x-1.5 overflow-hidden">
-                                  <span className="text-[13px] font-black text-gray-800 tracking-tight truncate">{apt.name}</span>
-                                  <ExternalLink size={10} className="text-gray-300 shrink-0 hover:text-blue-500 transition-colors" onClick={(e) => { e.stopPropagation(); window.open(getNaverLandUrl(apt.name), '_blank'); }} />
+                      <div className="px-4 pb-4 animate-in slide-in-from-top-4 duration-500">
+                        <div className="h-px bg-gray-100 mb-3" />
+                        {/* Other complexes */}
+                        {spot.complexes.length > 1 && (
+                          <div className="space-y-1.5 mb-3">
+                            <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest px-1">같은 역세권 다른 단지</div>
+                            {spot.complexes.map((apt, idx) => (
+                              <div key={idx} onClick={() => setExpandedComplexIdx(idx)} className={`p-2.5 rounded-xl border transition-all cursor-pointer ${expandedComplexIdx === idx ? 'bg-blue-50 border-blue-200' : 'bg-gray-50/50 border-transparent'}`}>
+                                <div className="flex justify-between items-center gap-2">
+                                  <div className="flex items-center space-x-1.5 overflow-hidden">
+                                    <span className={`text-[12px] font-black tracking-tight truncate ${expandedComplexIdx === idx ? 'text-blue-700' : 'text-gray-700'}`}>{apt.name}</span>
+                                    <ExternalLink size={9} className="text-gray-300 shrink-0 hover:text-blue-500 transition-colors" onClick={(e) => { e.stopPropagation(); window.open(getNaverLandUrl(apt.name), '_blank'); }} />
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <span className="text-[10px] font-black text-blue-600">{apt.display_price_value}</span>
+                                  </div>
                                 </div>
-                                <span className="text-[11px] font-black text-blue-600 shrink-0"><span className="text-[8px] text-gray-400 font-bold mr-1">{apt.display_price_label}</span>{apt.display_price_value}</span>
+                                {expandedComplexIdx === idx && (
+                                  <div className="mt-2 flex gap-1.5 animate-in fade-in duration-300">
+                                    <div className="flex-1 bg-white py-1.5 rounded-lg text-center border border-gray-100"><div className="text-[8px] font-black text-gray-400">실제 지출</div><div className="text-[11px] font-black text-gray-800">{apt.fixed_monthly_exp}만</div></div>
+                                    <div className="flex-1 bg-white py-1.5 rounded-lg text-center border border-orange-100"><div className="text-[8px] font-black text-orange-400">숨은 비용</div><div className="text-[11px] font-black text-orange-600">{apt.hidden_life_cost}만</div></div>
+                                    <div className="flex-1 bg-white py-1.5 rounded-lg text-center border border-red-100"><div className="text-[8px] font-black text-red-400">총 손실</div><div className="text-[11px] font-black text-red-600">{apt.total_opp_cost}만</div></div>
+                                  </div>
+                                )}
                               </div>
-                              {expandedComplexIdx === idx && (
-                                <div className="mt-3 grid grid-cols-2 gap-2 animate-in fade-in duration-300">
-                                  <div className="bg-white p-2 rounded-lg border border-blue-100 shadow-sm text-center"><div className="text-[8px] font-black text-gray-400 uppercase mb-0.5">월 지출</div><div className="text-[12px] font-black text-gray-900">{apt.fixed_monthly_exp}만</div></div>
-                                  <div className="bg-white p-2 rounded-lg border border-blue-100 shadow-sm text-center"><div className="text-[8px] font-black text-gray-400 uppercase mb-0.5 text-orange-500">에너지 비용</div><div className="text-[12px] font-black text-gray-900">{apt.hidden_life_cost}만</div></div>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                        <button onClick={() => {const c = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0]; if(c) window.open(getNaverLandUrl(c.name), '_blank');}} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3.5 rounded-xl text-xs transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg">
+                            ))}
+                          </div>
+                        )}
+                        <button onClick={() => {const c = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0]; if(c) window.open(getNaverLandUrl(c.name), '_blank');}} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3 rounded-xl text-xs transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg">
                           <ExternalLink size={14} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span>
                         </button>
                       </div>
                     )}
                   </div>
-                ))}
-                <div className="mt-6 p-8 pb-40 bg-white/40 rounded-[2rem] border border-gray-100 text-center opacity-60 space-y-3">
-                  <h6 className="text-[12px] font-black text-gray-900 leading-tight">통근 시간은 버려지는 기회비용입니다</h6>
-                  <p className="text-[10px] font-bold text-gray-500 leading-relaxed">왕복 2시간 통근은 연간 약 20일의 자유를 뺏습니다.<br/>인생 시급을 기준으로 주거를 다시 정의하세요.</p>
+                  );
+                })}
+                <div className="mt-4 p-6 pb-32 bg-orange-50/50 rounded-[2rem] border border-orange-100 text-center space-y-2">
+                  <div className="text-[20px]">&#9888;&#65039;</div>
+                  <h6 className="text-[12px] font-black text-gray-900 leading-tight">"보이지 않는 비용"이 진짜 비용입니다</h6>
+                  <p className="text-[10px] font-bold text-gray-500 leading-relaxed">매일 왕복 2시간 통근 = 연간 <span className="text-orange-600 font-black">480시간</span> = <span className="text-orange-600 font-black">20일</span>을 길 위에서 소비합니다.<br/>그 시간의 가치를 당신의 시급으로 환산하면?</p>
                 </div>
               </>
             ) : (
