@@ -404,15 +404,26 @@ async def optimize_location(request: OptimizeRequest):
 
             # 좌표 정보 획득 (동 좌표 기반)
             dong_key = f"{city_code}_{dong_name}"
-            lat, lng = mid_lat, mid_lng # Fallback
+            lat, lng = None, None
+            
             if dong_key in DONG_COORDS:
                 coord = DONG_COORDS[dong_key]
                 lat, lng = coord['lat'], coord['lng']
             else:
-                continue # 좌표 정보 없는 동은 일단 제외 (데이터 무결성)
+                # [고도화] 특정 동 좌표가 없으면 구 단위(city_code) 대표 좌표라도 매칭 시도
+                # (지방이나 경기도 외곽 대응용)
+                city_key = f"{city_code}_"
+                # city_code로 시작하는 첫 번째 동의 좌표를 구 대표로 사용
+                for k, v in DONG_COORDS.items():
+                    if k.startswith(city_code):
+                        lat, lng = v['lat'], v['lng']
+                        break
+            
+            if not lat:
+                continue # 여전히 좌표 정보 없으면 제외
 
             dist_from_mid = calculate_distance(lat, lng, mid_lat, mid_lng)
-            if dist_from_mid > 50: continue # 수도권 밖 제외
+            if dist_from_mid > 80: continue # 수도권 광역 커버 (80km)
 
             candidates.append({
                 "name": apt_name, "dong": dong_name, "city_code": city_code,
