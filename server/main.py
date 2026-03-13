@@ -367,9 +367,25 @@ async def optimize_location(request: OptimizeRequest):
             query += ' AND build_year >= ?'
             params.append(min_build_year)
         
-        query += ' GROUP BY apt_name, dong_name, city_code HAVING COUNT(*) >= 5'
+        query += ' GROUP BY apt_name, dong_name, city_code HAVING COUNT(*) >= 3'
         cursor.execute(query, params)
         all_complexes = cursor.fetchall()
+        
+        # 만약 결과가 없다면, 연식 필터를 해제하고 다시 시도 (지능형 폴백)
+        if not all_complexes and min_build_year > 0:
+            query_fallback = '''
+                SELECT apt_name, dong_name, city_code, 
+                       AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent,
+                       exclusive_area, build_year
+                FROM rent_transactions
+                WHERE deal_year >= 2024
+                AND exclusive_area >= ? AND exclusive_area <= ?
+                GROUP BY apt_name, dong_name, city_code HAVING COUNT(*) >= 3
+            '''
+            cursor.execute(query_fallback, [request.min_area, request.max_area])
+            all_complexes = cursor.fetchall()
+            logger.info("Fallback activated: Age filter removed to find results.")
+
         conn.close()
 
         # 3. 직선거리 기준 후보군 100개 추출 (Fast Scan)
