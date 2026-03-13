@@ -39,32 +39,38 @@ def get_precise_commute(db_path, from_lat, from_lng, to_lat, to_lng, transport_m
     
     if transport_mode == 'car':
         if NAVER_CLIENT_ID and NAVER_CLIENT_SECRET:
+            # Directions 5 공식 엔드포인트
             url = "https://naveropenapi.apigw.ntruss.com/map-direction/v1/driving"
             headers = {
-                "X-NCP-APIGW-API-KEY-ID": NAVER_CLIENT_ID,
-                "X-NCP-APIGW-API-KEY": NAVER_CLIENT_SECRET
+                "X-NCP-APIGW-API-KEY-ID": NAVER_CLIENT_ID.strip(),
+                "X-NCP-APIGW-API-KEY": NAVER_CLIENT_SECRET.strip(),
+                "Accept": "application/json"
             }
             
-            # 현실적인 통근 시간 시뮬레이션 (출근 07:30 출발 기준)
-            # 네이버 API 형식: YYYY-MM-DDTHH:mm:ss
             now = datetime.now()
             departure_time = now.replace(hour=7, minute=30, second=0, microsecond=0).isoformat()
             
             params = {
                 "start": f"{from_lng},{from_lat}",
                 "goal": f"{to_lng},{to_lat}",
-                "option": "trafast",
-                "departure_time": departure_time # 실시간 교통정보 반영
+                "option": "trafast" # Directions 5 필수 옵션 중 하나
             }
             try:
-                res = requests.get(url, headers=headers, params=params, timeout=3)
+                print(f"[Naver API] Requesting Directions 5...")
+                res = requests.get(url, headers=headers, params=params, timeout=5)
                 data = res.json()
-                if data.get('code') == 0:
+                
+                if res.status_code == 200 and data.get('code') == 0:
+                    print(f"[Naver API] Success!")
                     duration = int(data['route']['trafast'][0]['summary']['duration'] / 60000)
-                    distance = data['route']['trafast'][0]['summary']['distance'] / 1000 # km
+                    distance = data['route']['trafast'][0]['summary']['distance'] / 1000
+                elif data.get('error', {}).get('errorCode') == '210':
+                    print(f"[Naver API] CRITICAL: Subscription to 'Directions 5' is missing in NCP Console.")
+                    print(f"Please check if 'Directions 5' is checked in Application settings.")
+                else:
+                    print(f"[Naver API] Error {res.status_code}: {data}")
             except Exception as e:
-                print(f"Naver API error: {e}")
-    
+                print(f"[Naver API] Connection Exception: {e}")
     # 3. 대중교통 (현재는 직선거리 보정치 사용, 향후 ODsay 등 연동)
     if not duration:
         # Fallback logic
