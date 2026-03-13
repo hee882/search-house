@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, ShieldCheck, List, Settings2, Train, X, HelpCircle, DollarSign, Home, Calculator, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
-import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds, getZoom, setZoom } from './lib/map';
+import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds, getZoom, setZoom, setCenter } from './lib/map';
 
 // 지하철 호선별 공식 색상
 const LINE_COLORS = {
@@ -68,7 +68,6 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
   const dropdownRef = useRef(null);
   const listRef = useRef(null);
 
-  // 모바일 여부 확인
   const isMobile = window.innerWidth < 768;
 
   const filteredStations = useMemo(() => {
@@ -97,7 +96,7 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
         };
         return score(b) - score(a);
       })
-      .slice(0, 15); // 모바일 가독성을 위해 더 많은 결과 노출
+      .slice(0, 15);
   }, [keyword, stations, value]);
 
   const handleSelect = (station) => {
@@ -190,9 +189,7 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
                     onMouseEnter={() => setSelectedIndex(i)} 
                     className={`w-full text-left px-6 py-4 flex items-center gap-5 transition-colors duration-150 relative overflow-hidden group/item ${selectedIndex === i ? 'bg-blue-50/80' : 'text-gray-600 border-b border-gray-50 last:border-0'}`}
                   >
-                    {/* Stable indicator bar to prevent jitter */}
                     <div className={`absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500 transition-transform duration-200 ease-out ${selectedIndex === i ? 'translate-x-0' : '-translate-x-full'}`} />
-                    
                     <div className={`shrink-0 p-2.5 rounded-2xl transition-all duration-200 ${selectedIndex === i ? 'bg-white shadow-md scale-110' : 'bg-gray-100'}`}>
                       <Train className={`h-5 w-5 ${selectedIndex === i ? 'text-blue-500' : 'text-gray-400'}`} />
                     </div>
@@ -236,54 +233,28 @@ function HelpModal({ isOpen, onClose }) {
           </div>
           <button onClick={onClose} className="p-2.5 bg-gray-100 rounded-full hover:bg-gray-200 transition-all active:scale-90"><X size={20} className="text-gray-500" /></button>
         </div>
-        
         <div className="flex-1 overflow-y-auto px-8 py-7 space-y-8 custom-scrollbar">
-          {/* Section 1: Philosophy */}
           <div className="space-y-3">
             <h3 className="text-[15px] font-black text-gray-900 flex items-center gap-2"><TrendingUp size={16} className="text-blue-600" /> "부자들은 시간을 삽니다"</h3>
             <p className="text-[12px] font-bold text-gray-500 leading-relaxed">
-              우리는 흔히 '저렴한 거주비'를 찾아 직장에서 멀리 떨어진 곳을 선택합니다. 하지만 이는 치명적인 계산 오류입니다. <span className="text-blue-600 font-black">진짜 비용은 당신의 지갑이 아니라 '시간'에서 빠져나가기 때문입니다.</span><br/><br/>
-              통근에 낭비되는 매일의 2시간은 한 달이면 <span className="text-gray-900 font-black">40시간</span>, 일 년이면 <span className="text-gray-900 font-black">20일</span>에 해당합니다. 1년에 20일의 자유를 도로 위에서 버리고 계신가요?
+              우리는 흔히 '저렴한 거주비'를 찾아 직장에서 멀리 떨어진 곳을 선택합니다. 진짜 비용은 당신의 지갑이 아니라 '시간'에서 빠져나가기 때문입니다.
             </p>
           </div>
-
-          {/* Section 2: Precise Algorithm */}
           <div className="space-y-4">
-            <h3 className="text-[15px] font-black text-gray-900 flex items-center gap-2"><Calculator size={16} className="text-blue-600" /> 인생 시급 알고리즘 (Math Logic)</h3>
-            <div className="grid gap-3">
-              <div className="bg-slate-900 rounded-[1.5rem] p-5 text-white shadow-xl">
-                <div className="text-[10px] font-black text-blue-400 uppercase mb-2 tracking-widest">Total Opportunity Cost Formula</div>
-                <div className="text-[14px] font-mono font-black border-l-4 border-blue-500 pl-4 py-1 mb-3">
-                  TOC = FC + (LHW × CT × FM)
-                </div>
-                <div className="space-y-2 text-[11px] font-medium text-slate-400">
-                  <p>· <span className="text-white font-black">FC (Fixed Cost):</span> 월 주거비 + 교통비 (보증금 이자 4% 반영)</p>
-                  <p>· <span className="text-white font-black">LHW (Life Hourly Wage):</span> 사용자의 연봉 기반 실질 시급</p>
-                  <p>· <span className="text-white font-black">CT (Commute Time):</span> 네이버 API 08:00 도착/18:00 출발 정밀 데이터</p>
-                  <p>· <span className="text-white font-black">FM (Fatigue Model):</span> 45분 이상 ×1.15 / 60분 이상 ×1.30 가중치</p>
-                </div>
+            <h3 className="text-[15px] font-black text-gray-900 flex items-center gap-2"><Calculator size={16} className="text-blue-600" /> 인생 시급 알고리즘</h3>
+            <div className="bg-slate-900 rounded-[1.5rem] p-5 text-white shadow-xl">
+              <div className="text-[14px] font-mono font-black border-l-4 border-blue-500 pl-4 py-1 mb-3">TOC = FC + (LHW × CT × FM)</div>
+              <div className="space-y-2 text-[11px] font-medium text-slate-400">
+                <p>· <span className="text-white">FC:</span> 월 주거비 + 교통비</p>
+                <p>· <span className="text-white">LHW:</span> 연봉 기반 실질 시급</p>
+                <p>· <span className="text-white">CT:</span> 네이버 API 08:00 도착 정밀 데이터</p>
+                <p>· <span className="text-white">FM:</span> 장거리 피로도 가중치</p>
               </div>
             </div>
           </div>
-
-          {/* Section 3: Value Proposition */}
-          <div className="bg-blue-50 rounded-[2rem] p-6 border border-blue-100 relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-10"><Zap size={80} className="text-blue-600" /></div>
+          <div className="bg-blue-50 rounded-[2rem] p-6 border border-blue-100">
             <h4 className="text-[14px] font-black text-blue-700 mb-3">복리로 돌아오지 않는 유일한 자산</h4>
-            <p className="text-[11.5px] font-bold text-gray-600 leading-relaxed mb-4">
-              Search House는 단순히 싼 집을 나열하지 않습니다. <br/>
-              당신의 <span className="text-gray-900 font-black">라이프스타일 가치</span>를 수학적으로 증명하여, <br/>
-              하루가 가장 풍요로워지는 '최적의 생존 입지'를 제안합니다.
-            </p>
-            <button onClick={onClose} className="w-full bg-blue-600 py-3 rounded-xl text-white font-black text-[13px] shadow-lg shadow-blue-200 active:scale-[0.98] transition-all">이해했습니다. 분석 시작하기</button>
-          </div>
-
-          {/* Section 4: Data Credibility */}
-          <div className="pt-4 border-t border-gray-100">
-            <h3 className="text-[12px] font-black text-gray-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><ShieldCheck size={14} /> Data Credibility</h3>
-            <p className="text-[10px] font-bold text-gray-400 leading-relaxed">
-              본 서비스는 국토교통부 실거래가 공식 API(매일 갱신)와 네이버 클라우드 플랫폼의 실시간 교통망 시뮬레이션을 결합하여 수도권 620개 역세권과 3만 개 단지를 전수 조사합니다.
-            </p>
+            <button onClick={onClose} className="w-full bg-blue-600 py-3 rounded-xl text-white font-black text-[13px]">분석 시작하기</button>
           </div>
         </div>
       </div>
@@ -374,7 +345,8 @@ function App() {
     if (!isAlreadyExpanded) {
       drawCommutePaths(spot, workplaceLocs, mode);
       if (window.innerWidth < 768) {
-        setMobileSheetState('peek');
+        setMobileSheetState('hidden');
+        setCenter(map, { lat: spot.lat, lng: spot.lng });
       }
     } else {
       pathsRef.current.forEach(p => p.setMap(null));
@@ -443,7 +415,9 @@ function App() {
       await sleep(500); setResults(data.results);
       if (data.results?.length > 0) {
         setInputsCollapsed(true);
-        if (window.innerWidth < 768) setMobileSheetState('peek');
+        if (window.innerWidth < 768) setMobileSheetState('hidden');
+      } else {
+        if (window.innerWidth < 768) setMobileSheetState('full');
       }
       
       if (data.results?.length > 0) {
@@ -458,13 +432,8 @@ function App() {
     } catch (err) { console.error(err); alert("분석 중 오류가 발생했습니다."); } finally { setLoading(false); setLoadingMessage(""); }
   };
 
-  const handleMobileSheetToggle = () => {
-    setMobileSheetState(prev => prev === 'full' ? 'peek' : 'full');
-  };
-
   return (
     <div className="relative w-full h-[100dvh] overflow-hidden antialiased bg-gray-50 text-gray-900 font-sans">
-      {/* 1. Map Layer */}
       <div ref={mapContainerRef} className="absolute inset-0 w-full h-full z-0 bg-gray-100 flex items-center justify-center">
         {!isReady && !mapError && (
           <div className="flex flex-col items-center space-y-4">
@@ -474,7 +443,6 @@ function App() {
         )}
       </div>
 
-      {/* Premium Loading Overlay */}
       {loading && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-white/70 backdrop-blur-md animate-in fade-in duration-300">
           <div className="flex flex-col items-center space-y-6 max-w-[280px] text-center">
@@ -495,22 +463,19 @@ function App() {
         </div>
       )}
 
-      {/* Sidebar/Bottom Sheet Container */}
       <div className={`absolute z-[1000] transition-all duration-500 cubic-bezier(0.4, 0, 0.2, 1) flex flex-col 
-        md:inset-y-0 md:left-0 md:w-[420px] md:bg-white md:border-r md:border-gray-100 md:shadow-2xl
+        md:inset-y-0 md:left-0 md:w-[420px] md:bg-white md:border-r md:border-gray-100 md:shadow-[10px_0_30px_rgba(0,0,0,0.02)]
         ${window.innerWidth < 768 
-          ? `inset-x-0 bottom-0 bg-white rounded-t-[2.5rem] shadow-[0_-20px_60px_rgba(0,0,0,0.15)] overflow-hidden 
+          ? `inset-x-0 bottom-0 bg-white rounded-t-[2.5rem] shadow-[0_-20px_60px_rgba(0,0,0,0.12)] overflow-hidden 
              ${mobileSheetState === 'hidden' ? 'translate-y-full' : (mobileSheetState === 'peek' ? 'translate-y-[calc(100%-80px)]' : 'translate-y-0 h-[85vh]')}`
           : (isSidebarOpen ? 'translate-x-0' : '-translate-x-full')
         }
       `}>
-        {/* Desktop Sidebar Toggle Button */}
-        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className={`hidden md:flex absolute top-1/2 -right-4 -translate-y-1/2 w-8 h-12 bg-white border border-gray-100 shadow-xl rounded-r-xl items-center justify-center text-gray-400 hover:text-blue-600 transition-all z-[1100]`}>
+        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className={`hidden md:flex absolute top-1/2 -right-4 -translate-y-1/2 w-8 h-12 bg-white border border-gray-100 shadow-sm rounded-r-xl items-center justify-center text-gray-400 hover:text-blue-600 transition-all z-[1100]`}>
           {isSidebarOpen ? <ChevronLeft size={20} strokeWidth={3} /> : <ChevronRight size={20} strokeWidth={3} className="ml-4" />}
         </button>
 
-        {/* Mobile Drag Handle */}
-        <div className="md:hidden w-full h-8 flex items-center justify-center cursor-pointer shrink-0 border-b border-gray-50" onClick={handleMobileSheetToggle}>
+        <div className="md:hidden w-full h-8 flex items-center justify-center cursor-pointer shrink-0 border-b border-gray-50" onClick={() => setMobileSheetState(prev => prev === 'full' ? 'peek' : 'full')}>
           <div className="w-12 h-1.5 bg-gray-200 rounded-full" />
         </div>
 
@@ -519,7 +484,7 @@ function App() {
             <div className="flex items-center justify-between mb-4 md:mb-6">
               <div className="flex items-center space-x-3 cursor-pointer" onClick={() => window.location.reload()}>
                 <img src="logo.svg" alt="Logo" className="w-10 h-10 md:w-12 md:h-12" />
-                <span className="text-lg md:text-2xl font-black uppercase tracking-tight">Search House</span>
+                <span className="text-lg md:text-2xl font-black uppercase tracking-tight text-slate-900">Search House</span>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => setShowHelp(true)} className="p-2 bg-gray-100 rounded-full transition-colors hover:bg-blue-50 active:bg-blue-100" title="사용 가이드"><HelpCircle size={16} className="text-gray-400 hover:text-blue-500" /></button>
@@ -605,7 +570,7 @@ function App() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar space-y-3 border-t border-gray-50 bg-gray-50/30 pb-32">
-            {results ? (
+            {results && results.length > 0 ? (
               <>
                 <div className="flex items-center justify-between px-1 mb-1">
                   <h5 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">최적 생존 입지 <span className="ml-1 text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full text-[9px]">{results.length}</span></h5>
@@ -669,42 +634,35 @@ function App() {
                 <div className="mt-4 p-6 bg-orange-50/50 rounded-[2rem] border border-orange-100 text-center space-y-3">
                   <div className="text-[20px]">💡</div>
                   <h6 className="text-[13px] font-black text-gray-900 leading-tight">혹시 '저렴한 집'만 찾고 계셨나요?</h6>
-                  <p className="text-[11px] font-bold text-gray-500 leading-relaxed">
-                    부자들은 집을 살 때 <span className="text-orange-600 font-black">시간을 함께 삽니다.</span><br/>
-                    왕복 2시간의 통근은 한 달에 약 40시간의 자유를 뺏습니다.<br/>
-                    <span className="text-gray-900 font-black">아낀 40시간으로 당신은 무엇을 할 수 있나요?</span>
-                  </p>
+                  <p className="text-[11px] font-bold text-gray-500 leading-relaxed">부자들은 집을 살 때 시간을 함께 삽니다. 왕복 2시간의 통근은 한 달에 약 40시간의 자유를 뺏습니다.</p>
                 </div>
               </>
+            ) : results && results.length === 0 ? (
+              <div className="flex flex-col items-center justify-center text-center p-8 py-16 animate-in fade-in duration-500">
+                <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-6 text-red-500"><AlertTriangle size={32} /></div>
+                <h4 className="text-[18px] font-black text-gray-900 mb-2">분석 결과가 없습니다</h4>
+                <p className="text-[12px] font-bold text-gray-400 leading-relaxed mb-8">조건이 너무 까다로워 적절한 단지를 찾지 못했습니다.<br/>다음 조정을 통해 다시 시도해 보세요.</p>
+                <div className="w-full space-y-2">
+                  {[
+                    ['주거비 한도 높이기', '현재보다 5~10% 정도 예산을 높여보세요.'],
+                    ['방 타입 변경', '면적 제한을 조금 더 넓게 설정해 보세요.'],
+                    ['준공 연한 해제', '신축 위주라면 구축까지 범위를 넓혀보세요.'],
+                  ].map(([title, desc], idx) => (
+                    <div key={idx} className="bg-white p-3 rounded-xl border border-gray-100 text-left">
+                      <div className="text-[11px] font-black text-gray-700 mb-0.5">{title}</div>
+                      <div className="text-[10px] font-medium text-gray-400 leading-tight">{desc}</div>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={() => { setInputsCollapsed(false); setMobileSheetState('full'); }} className="mt-8 w-full py-3 bg-blue-600 text-white rounded-xl font-black text-[13px] shadow-lg">조건 수정하러 가기</button>
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center text-center p-6 py-12 animate-in fade-in zoom-in duration-700">
-                <div className="w-16 h-16 bg-blue-600/10 rounded-[2.5rem] flex items-center justify-center mb-8 relative">
-                  <div className="absolute inset-0 bg-blue-400 rounded-[2.5rem] animate-ping opacity-20" />
-                  <Coins size={32} className="text-blue-600" />
-                </div>
-                
-                <h4 className="text-[22px] font-black text-gray-900 mb-6 tracking-tighter leading-[1.3]">
-                  저렴한 집만 찾으셨나요?<br/>
-                  <span className="text-blue-600 text-[24px]">부자들은 통근 시간을 삽니다</span>
-                </h4>
-                
-                <div className="space-y-5 max-w-[280px] mx-auto text-left">
-                  <div className="flex items-start space-x-3">
-                    <div className="shrink-0 mt-1 w-5 h-5 rounded-full bg-blue-50 flex items-center justify-center"><Zap size={12} className="text-blue-600" /></div>
-                    <p className="text-[12px] font-bold text-gray-500 leading-snug">
-                      도로 위에서 증발하는 연간 480시간, <br/><span className="text-gray-900 font-black">당신의 시급</span>으로 환산하면 얼마일까요?
-                    </p>
-                  </div>
-                  <div className="flex items-start space-x-3">
-                    <div className="shrink-0 mt-1 w-5 h-5 rounded-full bg-green-50 flex items-center justify-center"><ShieldCheck size={12} className="text-green-600" /></div>
-                    <p className="text-[12px] font-bold text-gray-500 leading-snug">
-                      단순 집값이 아닌 <span className="text-gray-900 font-black">'인생 시급'</span>을 반영하여 <br/>당신의 하루가 가장 풍요로워질 입지를 찾아드립니다.
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="mt-12 pt-8 border-t border-gray-100 w-full">
-                  <p className="text-[11px] font-black text-gray-300 uppercase tracking-[0.2em]">Start Your Smart Life</p>
+                <div className="w-14 h-14 bg-blue-600/10 rounded-2xl flex items-center justify-center mb-6 relative"><div className="absolute inset-0 bg-blue-400 rounded-2xl animate-ping opacity-20" /><Coins size={24} className="text-blue-600" /></div>
+                <h4 className="text-[19px] font-black text-gray-900 mb-5 tracking-tighter leading-[1.25]">매일 버려지는 당신의 시간은<br/><span className="text-blue-600 text-[21px]">수백만원의 기회비용</span>입니다</h4>
+                <div className="space-y-4 max-w-[270px] mx-auto text-left">
+                  <div className="flex items-start space-x-3"><div className="shrink-0 mt-1 w-4 h-4 rounded-full bg-blue-50 flex items-center justify-center"><Zap size={10} className="text-blue-600" /></div><p className="text-[11.5px] font-bold text-gray-500 leading-tight">왕복 2시간 통근은 <span className="text-gray-900 font-black">연간 약 20일</span>의 자유시간을 연기처럼 사라지게 만듭니다.</p></div>
+                  <div className="flex items-start space-x-3"><div className="shrink-0 mt-1 w-4 h-4 rounded-full bg-green-50 flex items-center justify-center"><ShieldCheck size={10} className="text-green-600" /></div><p className="text-[11.5px] font-bold text-gray-500 leading-tight">당신의 <span className="text-gray-900 font-black">인생 시급</span>을 기준으로 가장 '풍요로운' 삶을 찾아보세요.</p></div>
                 </div>
               </div>
             )}
@@ -712,24 +670,42 @@ function App() {
         </div>
       </div>
 
-      {results && mobileSheetState === 'hidden' && (
-        <div className="md:hidden absolute bottom-6 inset-x-0 z-[1100] flex overflow-x-auto no-scrollbar gap-4 px-4 snap-x">
-          {results.map((spot, i) => (
-            <div key={i} onClick={() => handleSpotClick(spot, i)} className={`flex-none w-[80vw] snap-center bg-white/90 backdrop-blur-xl p-5 rounded-[2rem] shadow-2xl border-2 transition-all ${expandedSpotIndex === i ? 'border-blue-500' : 'border-transparent'}`}>
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black ${i === 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{i + 1}</div>
-                  <div><div className="text-[10px] font-black text-blue-500 uppercase">{spot.name} 인근</div><h6 className="text-base font-black tracking-tight truncate w-32">{spot.complexes[0]?.name}</h6></div>
+      {results && results.length > 0 && mobileSheetState === 'hidden' && (
+        <div className="md:hidden absolute bottom-6 inset-x-0 z-[1100] flex overflow-x-auto no-scrollbar gap-4 px-4 snap-x pb-4">
+          {results.map((spot, i) => {
+            const topApt = spot.complexes[0];
+            const isSelected = expandedSpotIndex === i;
+            return (
+              <div 
+                key={i} 
+                onClick={() => handleSpotClick(spot, i)}
+                className={`flex-none w-[85vw] snap-center bg-white/95 backdrop-blur-xl p-5 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] border-2 transition-all duration-300
+                  ${isSelected ? 'border-blue-500 scale-100' : 'border-transparent scale-[0.96] opacity-90'}
+                `}
+              >
+                <div className="flex justify-between items-start mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black ${i === 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{i + 1}</div>
+                    <div><div className="text-[10px] font-black text-blue-500 uppercase">{spot.name}</div><h6 className="text-[16px] font-black tracking-tighter truncate w-[40vw]">{topApt?.name}</h6></div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[18px] font-black text-gray-900 leading-none">월 {spot.total_cost}만</div>
+                    <div className="text-[9px] font-black text-gray-300 uppercase mt-1">총 기회비용</div>
+                  </div>
                 </div>
-                <div className="text-right"><div className="text-[18px] font-black text-gray-900 leading-none">월 {spot.total_cost}만</div><div className="text-[9px] font-black text-gray-300 uppercase mt-1">총 손실 비용</div></div>
+                <div className="flex items-center gap-2">
+                  <div className="bg-blue-50 px-2.5 py-1 rounded-lg text-[11px] font-black text-blue-600 flex items-center gap-1"><Bus size={12} /> {spot.commute_time_1}분</div>
+                  <div className="bg-gray-50 px-2.5 py-1 rounded-lg text-[11px] font-black text-gray-500">실제 지출 월 {topApt?.fixed_monthly_exp}만</div>
+                  <div className="ml-auto flex items-center gap-1 text-blue-500 font-black text-[11px]">상세보기 <ChevronRight size={14} /></div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
       <button onClick={() => setMobileSheetState(prev => prev === 'hidden' ? 'peek' : 'full')} className="md:hidden absolute bottom-8 right-6 z-[1100] w-14 h-14 bg-gray-900 text-white rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all border-2 border-white/20">
-        {mobileSheetState === 'full' ? <ChevronDown size={24} /> : (results ? <List size={24} /> : <Search size={24} />)}
+        {mobileSheetState === 'full' ? <ChevronDown size={24} /> : (results ? <Settings2 size={24} /> : <Search size={24} />)}
       </button>
 
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
