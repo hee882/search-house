@@ -184,12 +184,20 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
             <div ref={listRef} className={`overflow-y-auto custom-scrollbar ${isMobile ? 'h-[calc(100%-40px)] pb-20' : 'max-h-[350px]'}`}>
               {filteredStations.length > 0 ? (
                 filteredStations.map((s, i) => (
-                  <button key={i} onClick={() => handleSelect(s)} onMouseEnter={() => setSelectedIndex(i)} className={`w-full text-left px-6 py-4.5 flex items-center gap-5 transition-all duration-200 ${selectedIndex === i ? 'bg-blue-50/80 border-l-[6px] border-blue-500 pl-4.5' : 'text-gray-600 border-b border-gray-50 last:border-0'}`}>
-                    <div className={`shrink-0 p-2.5 rounded-2xl transition-colors ${selectedIndex === i ? 'bg-white shadow-md' : 'bg-gray-100'}`}>
+                  <button 
+                    key={i} 
+                    onClick={() => handleSelect(s)} 
+                    onMouseEnter={() => setSelectedIndex(i)} 
+                    className={`w-full text-left px-6 py-4 flex items-center gap-5 transition-colors duration-150 relative overflow-hidden group/item ${selectedIndex === i ? 'bg-blue-50/80' : 'text-gray-600 border-b border-gray-50 last:border-0'}`}
+                  >
+                    {/* Stable indicator bar to prevent jitter */}
+                    <div className={`absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500 transition-transform duration-200 ease-out ${selectedIndex === i ? 'translate-x-0' : '-translate-x-full'}`} />
+                    
+                    <div className={`shrink-0 p-2.5 rounded-2xl transition-all duration-200 ${selectedIndex === i ? 'bg-white shadow-md scale-110' : 'bg-gray-100'}`}>
                       <Train className={`h-5 w-5 ${selectedIndex === i ? 'text-blue-500' : 'text-gray-400'}`} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className={`text-[16px] font-black tracking-tight truncate ${selectedIndex === i ? 'text-blue-700' : 'text-gray-800'}`}>
+                      <div className={`text-[16px] font-black tracking-tight truncate transition-colors ${selectedIndex === i ? 'text-blue-700' : 'text-gray-800'}`}>
                         {s.name}
                         {STATION_ALIASES[s.name] && <span className="ml-2 text-[13px] font-bold text-gray-400">({STATION_ALIASES[s.name][0].replace('역', '')})</span>}
                       </div>
@@ -214,36 +222,68 @@ function HelpModal({ isOpen, onClose }) {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[9999] flex items-end md:items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-      <div className="relative bg-white w-full md:w-[480px] md:max-h-[85vh] max-h-[90vh] md:rounded-3xl rounded-t-3xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 bg-white z-10 px-6 pt-5 pb-3 border-b border-gray-100 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <HelpCircle size={18} className="text-blue-600" />
-            <span className="text-[15px] font-black tracking-tight">Search House 철학</span>
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300" />
+      <div className="relative bg-white w-full md:w-[540px] md:max-h-[85vh] max-h-[92vh] md:rounded-[2.5rem] rounded-t-[2.5rem] shadow-[0_25px_100px_rgba(0,0,0,0.3)] overflow-hidden flex flex-col animate-in slide-in-from-bottom-10 duration-500" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white/80 backdrop-blur-xl z-10 px-8 pt-7 pb-4 border-b border-gray-100 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200">
+              <HelpCircle size={22} className="text-white" />
+            </div>
+            <div>
+              <span className="text-[18px] font-black tracking-tight text-gray-900 leading-none block mb-1">Search House 철학</span>
+              <span className="text-[11px] font-bold text-blue-500 uppercase tracking-widest">Logic & Philosophy v1.5</span>
+            </div>
           </div>
-          <button onClick={onClose} className="p-1.5 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors"><X size={16} /></button>
+          <button onClick={onClose} className="p-2.5 bg-gray-100 rounded-full hover:bg-gray-200 transition-all active:scale-90"><X size={20} className="text-gray-500" /></button>
         </div>
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-          <div>
-            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><TrendingUp size={14} className="text-blue-600" /> 시간을 산다는 것은 무엇인가요?</h3>
-            <p className="text-[11px] font-bold text-gray-500 leading-relaxed">
-              우리는 흔히 '저렴한 집'을 찾으려 먼 곳으로 떠납니다. 하지만 부자들은 반대로 행동합니다. <span className="text-blue-600 font-black">그들은 집을 사면서 동시에 '시간'을 삽니다.</span><br/><br/>
-              통근에 낭비되는 매일의 2시간을 운동, 독서, 혹은 사랑하는 사람과의 대화로 바꿀 수 있다면? 그 가치는 월세 몇십만 원보다 훨씬 큽니다.
+        
+        <div className="flex-1 overflow-y-auto px-8 py-7 space-y-8 custom-scrollbar">
+          {/* Section 1: Philosophy */}
+          <div className="space-y-3">
+            <h3 className="text-[15px] font-black text-gray-900 flex items-center gap-2"><TrendingUp size={16} className="text-blue-600" /> "부자들은 시간을 삽니다"</h3>
+            <p className="text-[12px] font-bold text-gray-500 leading-relaxed">
+              우리는 흔히 '저렴한 거주비'를 찾아 직장에서 멀리 떨어진 곳을 선택합니다. 하지만 이는 치명적인 계산 오류입니다. <span className="text-blue-600 font-black">진짜 비용은 당신의 지갑이 아니라 '시간'에서 빠져나가기 때문입니다.</span><br/><br/>
+              통근에 낭비되는 매일의 2시간은 한 달이면 <span className="text-gray-900 font-black">40시간</span>, 일 년이면 <span className="text-gray-900 font-black">20일</span>에 해당합니다. 1년에 20일의 자유를 도로 위에서 버리고 계신가요?
             </p>
           </div>
-          <div>
-            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><Calculator size={14} className="text-blue-600" /> 인생 시급 알고리즘</h3>
-            <div className="space-y-2.5">
-              <div className="bg-blue-50 rounded-xl p-3 border border-blue-100">
-                <div className="text-[10px] font-black text-blue-600 uppercase mb-1">진짜 주거 비용</div>
-                <div className="text-[11px] font-black text-gray-800 font-mono">실제 지출 + (인생 시급 × 통근 시간)</div>
-                <div className="text-[9px] font-bold text-gray-400 mt-1">Search House는 당신의 연봉을 시급으로 환산하여, 이동 시간이 뺏아가는 경제적 가치를 '눈에 보이게' 만들어 드립니다.</div>
+
+          {/* Section 2: Precise Algorithm */}
+          <div className="space-y-4">
+            <h3 className="text-[15px] font-black text-gray-900 flex items-center gap-2"><Calculator size={16} className="text-blue-600" /> 인생 시급 알고리즘 (Math Logic)</h3>
+            <div className="grid gap-3">
+              <div className="bg-slate-900 rounded-[1.5rem] p-5 text-white shadow-xl">
+                <div className="text-[10px] font-black text-blue-400 uppercase mb-2 tracking-widest">Total Opportunity Cost Formula</div>
+                <div className="text-[14px] font-mono font-black border-l-4 border-blue-500 pl-4 py-1 mb-3">
+                  TOC = FC + (LHW × CT × FM)
+                </div>
+                <div className="space-y-2 text-[11px] font-medium text-slate-400">
+                  <p>· <span className="text-white font-black">FC (Fixed Cost):</span> 월 주거비 + 교통비 (보증금 이자 4% 반영)</p>
+                  <p>· <span className="text-white font-black">LHW (Life Hourly Wage):</span> 사용자의 연봉 기반 실질 시급</p>
+                  <p>· <span className="text-white font-black">CT (Commute Time):</span> 네이버 API 08:00 도착/18:00 출발 정밀 데이터</p>
+                  <p>· <span className="text-white font-black">FM (Fatigue Model):</span> 45분 이상 ×1.15 / 60분 이상 ×1.30 가중치</p>
+                </div>
               </div>
             </div>
           </div>
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-5 text-center text-white shadow-lg">
-            <div className="text-[15px] font-black mb-1">당신의 1시간은 복리로 돌아오지 않습니다</div>
-            <p className="text-[11px] font-medium text-blue-100 leading-relaxed">단순히 싼 곳이 아닌, 당신의 하루가<br/>가장 풍요로워지는 입지를 지금 분석해 보세요.</p>
+
+          {/* Section 3: Value Proposition */}
+          <div className="bg-blue-50 rounded-[2rem] p-6 border border-blue-100 relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-10"><Zap size={80} className="text-blue-600" /></div>
+            <h4 className="text-[14px] font-black text-blue-700 mb-3">복리로 돌아오지 않는 유일한 자산</h4>
+            <p className="text-[11.5px] font-bold text-gray-600 leading-relaxed mb-4">
+              Search House는 단순히 싼 집을 나열하지 않습니다. <br/>
+              당신의 <span className="text-gray-900 font-black">라이프스타일 가치</span>를 수학적으로 증명하여, <br/>
+              하루가 가장 풍요로워지는 '최적의 생존 입지'를 제안합니다.
+            </p>
+            <button onClick={onClose} className="w-full bg-blue-600 py-3 rounded-xl text-white font-black text-[13px] shadow-lg shadow-blue-200 active:scale-[0.98] transition-all">이해했습니다. 분석 시작하기</button>
+          </div>
+
+          {/* Section 4: Data Credibility */}
+          <div className="pt-4 border-t border-gray-100">
+            <h3 className="text-[12px] font-black text-gray-400 mb-2 uppercase tracking-widest flex items-center gap-1.5"><ShieldCheck size={14} /> Data Credibility</h3>
+            <p className="text-[10px] font-bold text-gray-400 leading-relaxed">
+              본 서비스는 국토교통부 실거래가 공식 API(매일 갱신)와 네이버 클라우드 플랫폼의 실시간 교통망 시뮬레이션을 결합하여 수도권 620개 역세권과 3만 개 단지를 전수 조사합니다.
+            </p>
           </div>
         </div>
       </div>
