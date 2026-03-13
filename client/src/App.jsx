@@ -191,40 +191,31 @@ function HelpModal({ isOpen, onClose }) {
         <div className="sticky top-0 bg-white z-10 px-6 pt-5 pb-3 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <HelpCircle size={18} className="text-blue-600" />
-            <span className="text-[15px] font-black tracking-tight">사용 가이드</span>
+            <span className="text-[15px] font-black tracking-tight">Search House 철학</span>
           </div>
           <button onClick={onClose} className="p-1.5 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors"><X size={16} /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           <div>
-            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><TrendingUp size={14} className="text-blue-600" /> 이 서비스는 무엇인가요?</h3>
+            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><TrendingUp size={14} className="text-blue-600" /> 시간을 산다는 것은 무엇인가요?</h3>
             <p className="text-[11px] font-bold text-gray-500 leading-relaxed">
-              <span className="text-gray-900 font-black">Search House</span>는 단순 집값 비교가 아닌, <span className="text-orange-600 font-black">통근 시간의 기회비용</span>까지 포함한 <span className="text-blue-600 font-black">진짜 주거 비용</span>을 계산하여 최적 입지를 추천합니다.
+              우리는 흔히 '저렴한 집'을 찾으려 먼 곳으로 떠납니다. 하지만 부자들은 반대로 행동합니다. <span className="text-blue-600 font-black">그들은 집을 사면서 동시에 '시간'을 삽니다.</span><br/><br/>
+              통근에 낭비되는 매일의 2시간을 운동, 독서, 혹은 사랑하는 사람과의 대화로 바꿀 수 있다면? 그 가치는 월세 몇십만 원보다 훨씬 큽니다.
             </p>
           </div>
           <div>
-            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><Calculator size={14} className="text-blue-600" /> 비용 산출 방식</h3>
+            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><Calculator size={14} className="text-blue-600" /> 인생 시급 알고리즘</h3>
             <div className="space-y-2.5">
-              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                <div className="text-[10px] font-black text-blue-600 uppercase mb-1">월 주거비</div>
-                <div className="text-[11px] font-black text-gray-800 font-mono">(보증금 × 4% ÷ 12) + 월세</div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                <div className="text-[10px] font-black text-orange-600 uppercase mb-1">숨은 생활비</div>
-                <div className="text-[11px] font-black text-gray-800 font-mono">인생 시급 × 통근 시간(왕복) × 피로도 가중치</div>
-              </div>
               <div className="bg-blue-50 rounded-xl p-3 border border-blue-100">
-                <div className="text-[10px] font-black text-blue-600 uppercase mb-1">총 기회비용</div>
-                <div className="text-[11px] font-black text-gray-800 font-mono">실제 지출 + 숨은 비용</div>
-              </div>
-              <div className="pt-1">
-                <p className="text-[9px] font-black text-gray-400">※ 통근 시간은 네이버 API 기준 08:00 회사 도착, 18:00 회사 출발 시나리오를 시뮬레이션합니다.</p>
+                <div className="text-[10px] font-black text-blue-600 uppercase mb-1">진짜 주거 비용</div>
+                <div className="text-[11px] font-black text-gray-800 font-mono">실제 지출 + (인생 시급 × 통근 시간)</div>
+                <div className="text-[9px] font-bold text-gray-400 mt-1">Search House는 당신의 연봉을 시급으로 환산하여, 이동 시간이 뺏아가는 경제적 가치를 '눈에 보이게' 만들어 드립니다.</div>
               </div>
             </div>
           </div>
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-4 text-center text-white">
-            <div className="text-[14px] font-black mb-1">집은 사는 곳이 아니라, 사는 방식입니다</div>
-            <p className="text-[10px] font-bold text-blue-200 leading-relaxed">당신의 삶의 가치까지 고려한 스마트한 주거 탐색</p>
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-5 text-center text-white shadow-lg">
+            <div className="text-[15px] font-black mb-1">당신의 1시간은 복리로 돌아오지 않습니다</div>
+            <p className="text-[11px] font-medium text-blue-100 leading-relaxed">단순히 싼 곳이 아닌, 당신의 하루가<br/>가장 풍요로워지는 입지를 지금 분석해 보세요.</p>
           </div>
         </div>
       </div>
@@ -607,19 +598,45 @@ function App() {
                   </div>
                   );
                 })}
-                <div className="mt-4 p-6 bg-orange-50/50 rounded-[2rem] border border-orange-100 text-center space-y-2">
-                  <div className="text-[20px]">&#9888;&#65039;</div>
-                  <h6 className="text-[12px] font-black text-gray-900 leading-tight">"보이지 않는 비용"이 진짜 비용입니다</h6>
-                  <p className="text-[10px] font-bold text-gray-500 leading-relaxed">매일 왕복 2시간 통근 = 연간 <span className="text-orange-600 font-black">480시간</span> = <span className="text-orange-600 font-black">20일</span>을 길 위에서 소비합니다.<br/>그 시간의 가치를 당신의 시급으로 환산하면?</p>
+                <div className="mt-4 p-6 bg-orange-50/50 rounded-[2rem] border border-orange-100 text-center space-y-3">
+                  <div className="text-[20px]">💡</div>
+                  <h6 className="text-[13px] font-black text-gray-900 leading-tight">혹시 '저렴한 집'만 찾고 계셨나요?</h6>
+                  <p className="text-[11px] font-bold text-gray-500 leading-relaxed">
+                    부자들은 집을 살 때 <span className="text-orange-600 font-black">시간을 함께 삽니다.</span><br/>
+                    왕복 2시간의 통근은 한 달에 약 40시간의 자유를 뺏습니다.<br/>
+                    <span className="text-gray-900 font-black">아낀 40시간으로 당신은 무엇을 할 수 있나요?</span>
+                  </p>
                 </div>
               </>
             ) : (
               <div className="flex flex-col items-center justify-center text-center p-6 py-12 animate-in fade-in zoom-in duration-700">
-                <div className="w-14 h-14 bg-blue-600/10 rounded-2xl flex items-center justify-center mb-6 relative"><div className="absolute inset-0 bg-blue-400 rounded-2xl animate-ping opacity-20" /><Coins size={24} className="text-blue-600" /></div>
-                <h4 className="text-[19px] font-black text-gray-900 mb-5 tracking-tighter leading-[1.25]">매일 버려지는 당신의 시간은<br/><span className="text-blue-600 text-[21px]">수백만원의 기회비용</span>입니다</h4>
-                <div className="space-y-4 max-w-[270px] mx-auto text-left">
-                  <div className="flex items-start space-x-3"><div className="shrink-0 mt-1 w-4 h-4 rounded-full bg-blue-50 flex items-center justify-center"><Zap size={10} className="text-blue-600" /></div><p className="text-[11.5px] font-bold text-gray-500 leading-tight">왕복 2시간 통근은 <span className="text-gray-900 font-black">연간 약 20일</span>의 자유시간을 연기처럼 사라지게 만듭니다.</p></div>
-                  <div className="flex items-start space-x-3"><div className="shrink-0 mt-1 w-4 h-4 rounded-full bg-green-50 flex items-center justify-center"><ShieldCheck size={10} className="text-green-600" /></div><p className="text-[11.5px] font-bold text-gray-500 leading-tight">당신의 <span className="text-gray-900 font-black">인생 시급</span>을 기준으로 가장 '풍요로운' 삶을 찾아보세요.</p></div>
+                <div className="w-16 h-16 bg-blue-600/10 rounded-[2.5rem] flex items-center justify-center mb-8 relative">
+                  <div className="absolute inset-0 bg-blue-400 rounded-[2.5rem] animate-ping opacity-20" />
+                  <Coins size={32} className="text-blue-600" />
+                </div>
+                
+                <h4 className="text-[22px] font-black text-gray-900 mb-6 tracking-tighter leading-[1.3]">
+                  저렴한 집만 찾으셨나요?<br/>
+                  <span className="text-blue-600 text-[24px]">부자들은 통근 시간을 삽니다</span>
+                </h4>
+                
+                <div className="space-y-5 max-w-[280px] mx-auto text-left">
+                  <div className="flex items-start space-x-3">
+                    <div className="shrink-0 mt-1 w-5 h-5 rounded-full bg-blue-50 flex items-center justify-center"><Zap size={12} className="text-blue-600" /></div>
+                    <p className="text-[12px] font-bold text-gray-500 leading-snug">
+                      도로 위에서 증발하는 연간 480시간, <br/><span className="text-gray-900 font-black">당신의 시급</span>으로 환산하면 얼마일까요?
+                    </p>
+                  </div>
+                  <div className="flex items-start space-x-3">
+                    <div className="shrink-0 mt-1 w-5 h-5 rounded-full bg-green-50 flex items-center justify-center"><ShieldCheck size={12} className="text-green-600" /></div>
+                    <p className="text-[12px] font-bold text-gray-500 leading-snug">
+                      단순 집값이 아닌 <span className="text-gray-900 font-black">'인생 시급'</span>을 반영하여 <br/>당신의 하루가 가장 풍요로워질 입지를 찾아드립니다.
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="mt-12 pt-8 border-t border-gray-100 w-full">
+                  <p className="text-[11px] font-black text-gray-300 uppercase tracking-[0.2em]">Start Your Smart Life</p>
                 </div>
               </div>
             )}
