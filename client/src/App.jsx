@@ -268,6 +268,7 @@ function App() {
   const [housingRatio, setHousingRatio] = useState(0.25);
   const [roomType, setRoomType] = useState('all');
   const [buildingAge, setBuildingAge] = useState(0);
+  const [preference, setPreference] = useState('balance'); // 'money', 'balance', 'time'
   const [inputsCollapsed, setInputsCollapsed] = useState(false);
   const [inputs, setInputs] = useState({
     user1: { workplace: null, salary: 4000, transport: 'public' },
@@ -414,7 +415,17 @@ function App() {
       setWorkplaceLocs({ user1: loc1, user2: loc2 });
       const areaMap = { all: [40, 200], '2': [40, 60], '3': [60, 85], '4': [85, 200] };
       const [minArea, maxArea] = areaMap[roomType] || areaMap.all;
-      const payload = { mode, resident_type: residentType, housing_ratio: housingRatio, min_area: minArea, max_area: maxArea, max_building_age: buildingAge, user1: { workplace: loc1, salary: inputs.user1.salary, transport: inputs.user1.transport }, user2: loc2 ? { workplace: loc2, salary: inputs.user2.salary, transport: inputs.user2.transport } : null };
+      const payload = { 
+        mode, 
+        resident_type: residentType, 
+        housing_ratio: housingRatio, 
+        min_area: minArea, 
+        max_area: maxArea, 
+        max_building_age: buildingAge, 
+        preference: preference,
+        user1: { workplace: loc1, salary: inputs.user1.salary, transport: inputs.user1.transport }, 
+        user2: loc2 ? { workplace: loc2, salary: inputs.user2.salary, transport: inputs.user2.transport } : null 
+      };
 
       setLoadingMessage("수도권 3만 개 단지 실거래 데이터 필터링 중..."); await sleep(800);
       setLoadingMessage(`${inputs.user1.salary}만원 연봉 기반 최적 예산 구간 산출 완료`); await sleep(600);
@@ -569,6 +580,27 @@ function App() {
                   {[0.1, 0.2, 0.25, 0.3, 0.4].map((ratio) => { const status = getBudgetStatus(ratio); return (<button key={ratio} onClick={() => setHousingRatio(ratio)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${housingRatio === ratio ? `bg-white shadow-sm ${status.color}` : 'text-gray-400 hover:text-gray-600'}`}>{Math.round(ratio * 100)}%</button>); })}
                 </div>
               </div>
+
+              <div className="space-y-1.5">
+                <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">라이프스타일 성향</div>
+                <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
+                  {[
+                    { id: 'money', label: '가성비', icon: <Coins size={12} /> },
+                    { id: 'balance', label: '밸런스', icon: <Zap size={12} /> },
+                    { id: 'time', label: '워라밸', icon: <Coffee size={12} /> }
+                  ].map((p) => (
+                    <button 
+                      key={p.id} 
+                      onClick={() => setPreference(p.id)} 
+                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all flex items-center justify-center gap-1.5 
+                        ${preference === p.id ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+                    >
+                      {p.icon} {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex gap-2">
                 <div className="flex-1 space-y-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">방 타입</div><div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">{[['all', '전체'], ['2', '2룸'], ['3', '3룸'], ['4', '4룸+']].map(([val, label]) => (<button key={val} onClick={() => setRoomType(val)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${roomType === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>{label}</button>))}</div></div>
                 <div className="flex-1 space-y-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">준공</div><div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">{[[0, '전체'], [5, '5년'], [10, '10년'], [20, '20년']].map(([val, label]) => (<button key={val} onClick={() => setBuildingAge(val)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${buildingAge === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>{label}</button>))}</div></div>

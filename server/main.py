@@ -61,6 +61,7 @@ class OptimizeRequest(BaseModel):
     min_area: float = 40
     max_area: float = 200
     max_building_age: int = 0
+    preference: str = 'balance' # money, balance, time
 
 # --- Paths ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -416,11 +417,20 @@ async def optimize_location(request: OptimizeRequest):
             if request.mode == 'couple' and request.user2:
                 time2, dist2 = get_precise_commute(DB_PATH, spot['lat'], spot['lng'], request.user2.workplace.lat, request.user2.workplace.lng, request.user2.transport)
             
-            # 비용 계산 로직: 정밀 시간 및 피로도 반영
-            base_transport_cost = 10
-            hidden_cost1 = calculate_hidden_life_cost(request.user1.salary, time1)
-            hidden_cost2 = calculate_hidden_life_cost(request.user2.salary if request.user2 else 0, time2)
-            total_opp_cost = spot['monthly_housing_cost'] + base_transport_cost + hidden_cost1 + hidden_cost2
+            # 성향 가중치 적용 (money, balance, time)
+            fixed_monthly_exp = spot['monthly_housing_cost'] + base_transport_cost
+            total_hidden_life_cost = hidden_cost1 + hidden_cost2
+            
+            # 가중치 설정
+            w_fixed, w_hidden = 1.0, 1.0
+            if request.preference == 'money':
+                w_fixed, w_hidden = 1.6, 0.4 # 돈 아끼는 게 최고 (고정비 중시)
+            elif request.preference == 'time':
+                w_fixed, w_hidden = 0.4, 1.6 # 시간 아끼는 게 최고 (직주근접 중시)
+            
+            # 최종 스코어 (낮을수록 좋음)
+            weighted_score = int(fixed_monthly_exp * w_fixed + total_hidden_life_cost * w_hidden)
+            total_opp_cost = fixed_monthly_exp + total_hidden_life_cost # 표시용은 실제 합계
 
             results.append({
                 "name": spot['name'], "lat": spot['lat'], "lng": spot['lng'],
@@ -429,11 +439,11 @@ async def optimize_location(request: OptimizeRequest):
                     "name": spot['name'], "dong": spot['dong'], "rent_type": "전세" if spot['avg_rent'] == 0 else "월세",
                     "display_price_label": "전세" if spot['avg_rent'] == 0 else "월세",
                     "display_price_value": f"{spot['avg_deposit']}만 / {spot['avg_rent']}만" if spot['avg_rent'] > 0 else f"{spot['avg_deposit']}만",
-                    "fixed_monthly_exp": spot['monthly_housing_cost'] + 10,
-                    "hidden_life_cost": hidden_cost1 + hidden_cost2,
+                    "fixed_monthly_exp": fixed_monthly_exp,
+                    "hidden_life_cost": total_hidden_life_cost,
                     "total_opp_cost": total_opp_cost
                 }],
-                "score": total_opp_cost
+                "score": weighted_score
             })
 
         # 최종 가성비 순으로 정렬
