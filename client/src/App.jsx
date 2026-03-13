@@ -354,6 +354,12 @@ function App() {
 
   useEffect(() => { window.dispatchSpotClick = (index) => { if (results && results[index]) handleSpotClick(results[index], index); }; }, [results, handleSpotClick]);
 
+  const getBudgetStatus = (ratio) => {
+    if (ratio <= 0.2) return { label: '양호', color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100', icon: '✅' };
+    if (ratio <= 0.3) return { label: '주의', color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100', icon: '⚠️' };
+    return { label: '위험', color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100', icon: '🚨' };
+  };
+
   const handleSearch = async () => {
     if (!inputs.user1.workplace) { alert("나의 직장 위치를 선택해 주세요."); return; }
     const sleep = (ms) => new Promise(res => setTimeout(res, ms));
@@ -507,11 +513,30 @@ function App() {
                 </div>
               )}
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between px-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">소득 대비 주거비 한도</div><div className="text-[11px] font-black text-blue-600">월 {Math.round(((mode === 'couple' ? inputs.user1.salary + inputs.user2.salary : inputs.user1.salary) * housingRatio / 12))}만원 이내</div></div>
+                <div className="flex items-center justify-between px-1">
+                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">소득 대비 주거비 한도</div>
+                  <div className={`text-[11px] font-black ${getBudgetStatus(housingRatio).color}`}>
+                    {getBudgetStatus(housingRatio).icon} 월 {Math.round(((mode === 'couple' ? inputs.user1.salary + inputs.user2.salary : inputs.user1.salary) * housingRatio / 12))}만원 이내 ({getBudgetStatus(housingRatio).label})
+                  </div>
+                </div>
                 <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
-                  {[0.1, 0.2, 0.25, 0.3, 0.4].map((ratio) => (
-                    <button key={ratio} onClick={() => setHousingRatio(ratio)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${housingRatio === ratio ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}>{Math.round(ratio * 100)}%</button>
-                  ))}
+                  {[0.1, 0.2, 0.25, 0.3, 0.4].map((ratio) => {
+                    const status = getBudgetStatus(ratio);
+                    const isActive = housingRatio === ratio;
+                    return (
+                      <button 
+                        key={ratio} 
+                        onClick={() => setHousingRatio(ratio)} 
+                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all 
+                          ${isActive 
+                            ? `bg-white shadow-sm ${status.color}` 
+                            : 'text-gray-400 hover:text-gray-600'
+                          }`}
+                      >
+                        {Math.round(ratio * 100)}%
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -533,6 +558,10 @@ function App() {
                 </div>
                 {results.map((spot, i) => {
                   const topApt = spot.complexes[0];
+                  const monthlyIncome = ((mode === 'couple' ? inputs.user1.salary + inputs.user2.salary : inputs.user1.salary) * 10000 / 12) / 10000;
+                  const actualRatio = topApt?.fixed_monthly_exp / monthlyIncome;
+                  const status = getBudgetStatus(actualRatio);
+
                   return (
                   <div key={i} className={`transition-all rounded-[1.5rem] border overflow-hidden ${expandedSpotIndex === i ? 'bg-white border-blue-200 shadow-xl ring-1 ring-blue-100' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
                     <button onClick={() => handleSpotClick(spot, i)} className="w-full p-4 pb-3 text-left">
@@ -545,7 +574,9 @@ function App() {
                           </div>
                         </div>
                         <div className="text-right shrink-0 ml-2">
-                          <div className="text-[8px] font-black text-gray-300 uppercase mb-0.5">{topApt?.display_price_label}</div>
+                          <div className={`text-[9px] font-black px-2 py-0.5 rounded-full ${status.bg} ${status.color} border ${status.border} mb-1 inline-block`}>
+                            소득의 {Math.round(actualRatio * 100)}% ({status.label})
+                          </div>
                           <div className="text-[12px] font-black text-gray-700 tracking-tight">{topApt?.display_price_value}</div>
                         </div>
                       </div>
