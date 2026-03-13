@@ -313,6 +313,7 @@ function App() {
     user2: { workplace: null, salary: 4000, transport: 'public' }
   });
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState("");
   const [results, setResults] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
   const [expandedSpotIndex, setExpandedSpotIndex] = useState(null);
@@ -424,15 +425,29 @@ function App() {
   const handleSearch = async () => {
     if (!inputs.user1.workplace) { alert("나의 직장 위치를 선택해 주세요."); return; }
     setLoading(true);
+    setLoadingMessage("수도권 3만 개 단지 분석 중...");
+    
     try {
       const loc1 = inputs.user1.workplace;
       const loc2 = mode === 'couple' ? inputs.user2.workplace : null;
       setWorkplaceLocs({ user1: loc1, user2: loc2 });
+      
       const areaMap = { all: [40, 200], '2': [40, 60], '3': [60, 85], '4': [85, 200] };
       const [minArea, maxArea] = areaMap[roomType] || areaMap.all;
+      
+      // 단계별 메시지 (비동기 처리 중간에 섞어줌)
       const payload = { mode, resident_type: residentType, housing_ratio: housingRatio, min_area: minArea, max_area: maxArea, max_building_age: buildingAge, user1: { workplace: loc1, salary: inputs.user1.salary, transport: inputs.user1.transport }, user2: loc2 ? { workplace: loc2, salary: inputs.user2.salary, transport: inputs.user2.transport } : null };
-      const response = await fetch(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      
+      setLoadingMessage("최적 후보 100개 추출 완료");
+      // 인위적인 딜레이가 아닌, 실제 다음 단계 전환 시 메시지 변경
+      const fetchResponse = fetch(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      
+      setTimeout(() => setLoadingMessage("네이버 08:00 실시간 교통 분석 중..."), 800);
+
+      const response = await fetchResponse;
       const data = await response.json();
+      
+      setLoadingMessage("기회비용 랭킹 산출 중...");
       setResults(data.results);
       if (data.results?.length > 0) setInputsCollapsed(true);
       if (window.innerWidth < 768) setIsSidebarOpen(false);
@@ -445,7 +460,7 @@ function App() {
         setExpandedComplexIdx(0);
         setTimeout(() => { drawCommutePaths(data.results[0], { user1: loc1, user2: loc2 }, mode); }, 600);
       }
-    } catch (err) { console.error(err); alert("분석 중 오류가 발생했습니다."); } finally { setLoading(false); }
+    } catch (err) { console.error(err); alert("분석 중 오류가 발생했습니다."); } finally { setLoading(false); setLoadingMessage(""); }
   };
 
   return (
@@ -459,6 +474,27 @@ function App() {
           </div>
         )}
       </div>
+
+      {/* Premium Loading Overlay */}
+      {loading && (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-white/70 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="flex flex-col items-center space-y-6 max-w-[280px] text-center">
+            <div className="relative">
+              <div className="absolute inset-0 bg-blue-400/20 rounded-full animate-ping" />
+              <div className="relative w-20 h-20 bg-gray-900 rounded-[2.5rem] flex items-center justify-center shadow-2xl">
+                <Loader2 className="animate-spin text-blue-400" size={32} strokeWidth={3} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <h4 className="text-[18px] font-black text-gray-900 tracking-tighter">데이터 정밀 분석 중</h4>
+              <p className="text-[12px] font-bold text-blue-600 animate-pulse">{loadingMessage}</p>
+            </div>
+            <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-500 animate-loading-bar transition-all duration-1000" />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 2. Unified Sidebar/Bottom Sheet */}
       <div className={`absolute z-[1000] transition-all duration-500 ease-in-out flex flex-col 

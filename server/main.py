@@ -10,6 +10,7 @@ import os
 import logging
 import sqlite3
 from datetime import datetime
+from lib.naver_api import get_precise_commute
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -337,64 +338,108 @@ async def get_stations():
 @app.post("/api/optimize")
 async def optimize_location(request: OptimizeRequest):
     try:
-        if not STATIONS_DATA:
-            load_stations()
-        stations = STATIONS_DATA
-        mid_lat = (request.user1.workplace.lat + (request.user2.workplace.lat if request.user2 else request.user1.workplace.lat)) / 2
-        mid_lng = (request.user1.workplace.lng + (request.user2.workplace.lng if request.user2 else request.user1.workplace.lng)) / 2
-        # 월 주거비 예산 계산 (만원 단위)
+        # 1. 월 주거비 예산 계산 (만원 단위)
         total_salary = request.user1.salary
         if request.mode == 'couple' and request.user2:
             total_salary += request.user2.salary
         max_housing_budget = round((total_salary * 10000 / 12) * request.housing_ratio / 10000)
-        # 준공년도 필터: max_building_age=0이면 전체, 아니면 현재년도-N
+        
+        # 2. 전역 스캐닝: 조건에 맞는 모든 단지 로드
         min_build_year = 0
         if request.max_building_age > 0:
             min_build_year = datetime.now().year - request.max_building_age
 
-        results = []
-        for spot in stations:
-            dist_from_mid = calculate_distance(spot['lat'], spot['lng'], mid_lat, mid_lng)
-            if dist_from_mid > 50: continue
-            time1 = estimate_commute_time(calculate_distance(spot['lat'], spot['lng'], request.user1.workplace.lat, request.user1.workplace.lng), request.user1.transport)
-            time2 = 0
-            if request.mode == 'couple' and request.user2:
-                time2 = estimate_commute_time(calculate_distance(spot['lat'], spot['lng'], request.user2.workplace.lat, request.user2.workplace.lng), request.user2.transport)
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 주거비 필터링이 포함된 전역 쿼리
+        query = '''
+            SELECT apt_name, dong_name, city_code, 
+                   AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent,
+                   exclusive_area, build_year
+            FROM rent_transactions
+            WHERE deal_year >= 2024
+            AND exclusive_area >= ? AND exclusive_area <= ?
+        '''
+        params = [request.min_area, request.max_area]
+        if min_build_year > 0:
+            query += ' AND build_year >= ?'
+            params.append(min_build_year)
+        
+        query += ' GROUP BY apt_name, dong_name, city_code HAVING COUNT(*) >= 5'
+        cursor.execute(query, params)
+        all_complexes = cursor.fetchall()
+        conn.close()
+
+        # 3. 직선거리 기준 후보군 100개 추출 (Fast Scan)
+        mid_lat = (request.user1.workplace.lat + (request.user2.workplace.lat if request.user2 else request.user1.workplace.lat)) / 2
+        mid_lng = (request.user1.workplace.lng + (request.user2.workplace.lng if request.user2 else request.user1.workplace.lng)) / 2
+        
+        candidates = []
+        for row in all_complexes:
+            apt_name, dong_name, city_code = row[0], row[1], row[2]
+            avg_deposit, avg_rent = int(row[3]), int(row[4])
             
-            complexes = get_complexes_with_costs(
-                spot.get('city_code', ''), 
-                spot['lat'], spot['lng'],
-                request.user1.salary, time1, 
-                request.user2.salary if request.user2 else 0, time2, 
-                resident_type=request.resident_type, 
-                max_housing_budget=max_housing_budget,
-                min_area=request.min_area,
-                max_area=request.max_area,
-                min_build_year=min_build_year
-            )
-            if not complexes: continue
-            representative_cost = complexes[0]['total_opp_cost']
+            # 월 주거비용 계산 및 예산 필터링
+            monthly_housing_cost = round((avg_deposit * 0.04) / 12) + avg_rent
+            if max_housing_budget > 0 and monthly_housing_cost > max_housing_budget:
+                continue
+
+            # 좌표 정보 획득 (동 좌표 기반)
+            dong_key = f"{city_code}_{dong_name}"
+            lat, lng = mid_lat, mid_lng # Fallback
+            if dong_key in DONG_COORDS:
+                coord = DONG_COORDS[dong_key]
+                lat, lng = coord['lat'], coord['lng']
+            else:
+                continue # 좌표 정보 없는 동은 일단 제외 (데이터 무결성)
+
+            dist_from_mid = calculate_distance(lat, lng, mid_lat, mid_lng)
+            if dist_from_mid > 50: continue # 수도권 밖 제외
+
+            candidates.append({
+                "name": apt_name, "dong": dong_name, "city_code": city_code,
+                "lat": lat, "lng": lng, "monthly_housing_cost": monthly_housing_cost,
+                "dist_from_mid": dist_from_mid, "avg_deposit": avg_deposit, "avg_rent": avg_rent
+            })
+
+        # 직장 중심점에서 가까운 순으로 20개 후보군 정밀 분석 (비용 최적화)
+        candidates.sort(key=lambda x: x['dist_from_mid'])
+        top_candidates = candidates[:20]
+
+        results = []
+        for spot in top_candidates:
+            # 네이버 정밀 경로 분석 호출 (캐시 포함)
+            time1, dist1 = get_precise_commute(DB_PATH, spot['lat'], spot['lng'], request.user1.workplace.lat, request.user1.workplace.lng, request.user1.transport)
+            
+            time2, dist2 = 0, 0
+            if request.mode == 'couple' and request.user2:
+                time2, dist2 = get_precise_commute(DB_PATH, spot['lat'], spot['lng'], request.user2.workplace.lat, request.user2.workplace.lng, request.user2.transport)
+            
+            # 비용 계산 로직: 정밀 시간 반영
+            base_transport_cost = 10
+            hidden_cost1 = calculate_hidden_life_cost(request.user1.salary, time1)
+            hidden_cost2 = calculate_hidden_life_cost(request.user2.salary if request.user2 else 0, time2)
+            total_opp_cost = spot['monthly_housing_cost'] + base_transport_cost + hidden_cost1 + hidden_cost2
+
             results.append({
                 "name": spot['name'], "lat": spot['lat'], "lng": spot['lng'],
-                "total_cost": representative_cost, "commute_time_1": time1, "commute_time_2": time2,
-                "complexes": complexes, "score": representative_cost
+                "total_cost": total_opp_cost, "commute_time_1": time1, "commute_time_2": time2,
+                "complexes": [{
+                    "name": spot['name'], "dong": spot['dong'], "rent_type": "전세" if spot['avg_rent'] == 0 else "월세",
+                    "display_price_label": "전세" if spot['avg_rent'] == 0 else "월세",
+                    "display_price_value": f"{spot['avg_deposit']}만 / {spot['avg_rent']}만" if spot['avg_rent'] > 0 else f"{spot['avg_deposit']}만",
+                    "fixed_monthly_exp": spot['monthly_housing_cost'] + 10,
+                    "hidden_life_cost": hidden_cost1 + hidden_cost2,
+                    "total_opp_cost": total_opp_cost
+                }],
+                "score": total_opp_cost
             })
+
         results.sort(key=lambda x: x['score'])
-        # 중복 단지 제거: 이미 노출된 단지명은 건너뛰기
-        seen_complexes = set()
-        deduplicated = []
-        for r in results:
-            top_name = r['complexes'][0]['name']
-            if top_name in seen_complexes:
-                continue
-            for c in r['complexes']:
-                seen_complexes.add(c['name'])
-            deduplicated.append(r)
-            if len(deduplicated) >= 5:
-                break
-        return {"results": deduplicated}
+        return {"results": results[:5]}
     except Exception as e:
-        logger.error(f"Optimize error: {e}")
+        logger.error(f"Global Scan error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- Static Frontend Serving ---
