@@ -249,6 +249,7 @@ function App() {
   const [loadingMessage, setLoadingMessage] = useState("");
   const [results, setResults] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
+  const [mobileSheetState, setMobileSheetState] = useState('peek'); // 'hidden', 'peek', 'full'
   const [expandedSpotIndex, setExpandedSpotIndex] = useState(null);
   const [expandedComplexIdx, setExpandedComplexIdx] = useState(0);
   const [workplaceLocs, setWorkplaceLocs] = useState({ user1: null, user2: null });
@@ -282,6 +283,12 @@ function App() {
 
   useEffect(() => { fetchStations(); }, [fetchStations]);
 
+  const getBudgetStatus = (ratio) => {
+    if (ratio <= 0.2) return { label: '양호', color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100', icon: '✅' };
+    if (ratio <= 0.3) return { label: '주의', color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100', icon: '⚠️' };
+    return { label: '위험', color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100', icon: '🚨' };
+  };
+
   const drawCommutePaths = useCallback((spot, workplaceLocs, mode) => {
     if (!map) return;
     pathsRef.current.forEach(p => p.setMap(null));
@@ -307,7 +314,9 @@ function App() {
     setExpandedComplexIdx(0);
     if (!isAlreadyExpanded) {
       drawCommutePaths(spot, workplaceLocs, mode);
-      if (window.innerWidth < 768) setIsSidebarOpen(false);
+      if (window.innerWidth < 768) {
+        setMobileSheetState('peek');
+      }
     } else {
       pathsRef.current.forEach(p => p.setMap(null));
       pathsRef.current = [];
@@ -354,12 +363,6 @@ function App() {
 
   useEffect(() => { window.dispatchSpotClick = (index) => { if (results && results[index]) handleSpotClick(results[index], index); }; }, [results, handleSpotClick]);
 
-  const getBudgetStatus = (ratio) => {
-    if (ratio <= 0.2) return { label: '양호', color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100', icon: '✅' };
-    if (ratio <= 0.3) return { label: '주의', color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100', icon: '⚠️' };
-    return { label: '위험', color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100', icon: '🚨' };
-  };
-
   const handleSearch = async () => {
     if (!inputs.user1.workplace) { alert("나의 직장 위치를 선택해 주세요."); return; }
     const sleep = (ms) => new Promise(res => setTimeout(res, ms));
@@ -379,8 +382,10 @@ function App() {
       await sleep(1200); setLoadingMessage("기회비용 및 피로도 가중치 랭킹 산출 중...");
       const response = await fetchPromise; const data = await response.json();
       await sleep(500); setResults(data.results);
-      if (data.results?.length > 0) setInputsCollapsed(true);
-      if (window.innerWidth < 768) setIsSidebarOpen(false);
+      if (data.results?.length > 0) {
+        setInputsCollapsed(true);
+        if (window.innerWidth < 768) setMobileSheetState('peek');
+      }
       
       if (data.results?.length > 0) {
         const allPts = [...data.results, loc1];
@@ -394,8 +399,13 @@ function App() {
     } catch (err) { console.error(err); alert("분석 중 오류가 발생했습니다."); } finally { setLoading(false); setLoadingMessage(""); }
   };
 
+  const handleMobileSheetToggle = () => {
+    setMobileSheetState(prev => prev === 'full' ? 'peek' : 'full');
+  };
+
   return (
     <div className="relative w-full h-[100dvh] overflow-hidden antialiased bg-gray-50 text-gray-900 font-sans">
+      {/* 1. Map Layer */}
       <div ref={mapContainerRef} className="absolute inset-0 w-full h-full z-0 bg-gray-100 flex items-center justify-center">
         {!isReady && !mapError && (
           <div className="flex flex-col items-center space-y-4">
@@ -405,6 +415,7 @@ function App() {
         )}
       </div>
 
+      {/* Premium Loading Overlay */}
       {loading && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-white/70 backdrop-blur-md animate-in fade-in duration-300">
           <div className="flex flex-col items-center space-y-6 max-w-[280px] text-center">
@@ -425,16 +436,24 @@ function App() {
         </div>
       )}
 
-      <div className={`absolute z-[1000] transition-all duration-500 ease-in-out flex flex-col 
+      {/* Sidebar/Bottom Sheet Container */}
+      <div className={`absolute z-[1000] transition-all duration-500 cubic-bezier(0.4, 0, 0.2, 1) flex flex-col 
         md:inset-y-0 md:left-0 md:w-[420px] md:bg-white md:border-r md:border-gray-100 md:shadow-2xl
         ${window.innerWidth < 768 
-          ? (isSidebarOpen ? 'inset-x-0 bottom-0 h-[85vh] bg-white rounded-t-[3rem] shadow-[0_-20px_60px_rgba(0,0,0,0.15)] overflow-hidden' : 'inset-x-0 bottom-[-100%]')
+          ? `inset-x-0 bottom-0 bg-white rounded-t-[2.5rem] shadow-[0_-20px_60px_rgba(0,0,0,0.15)] overflow-hidden 
+             ${mobileSheetState === 'hidden' ? 'translate-y-full' : (mobileSheetState === 'peek' ? 'translate-y-[calc(100%-80px)]' : 'translate-y-0 h-[85vh]')}`
           : (isSidebarOpen ? 'translate-x-0' : '-translate-x-full')
         }
       `}>
+        {/* Desktop Sidebar Toggle Button */}
         <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className={`hidden md:flex absolute top-1/2 -right-4 -translate-y-1/2 w-8 h-12 bg-white border border-gray-100 shadow-xl rounded-r-xl items-center justify-center text-gray-400 hover:text-blue-600 transition-all z-[1100]`}>
           {isSidebarOpen ? <ChevronLeft size={20} strokeWidth={3} /> : <ChevronRight size={20} strokeWidth={3} className="ml-4" />}
         </button>
+
+        {/* Mobile Drag Handle */}
+        <div className="md:hidden w-full h-8 flex items-center justify-center cursor-pointer shrink-0 border-b border-gray-50" onClick={handleMobileSheetToggle}>
+          <div className="w-12 h-1.5 bg-gray-200 rounded-full" />
+        </div>
 
         <div className="flex flex-col h-full overflow-hidden relative">
           <div className="p-6 md:p-8 shrink-0 relative bg-white z-[100] border-b border-gray-50">
@@ -445,20 +464,18 @@ function App() {
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => setShowHelp(true)} className="p-2 bg-gray-100 rounded-full transition-colors hover:bg-blue-50 active:bg-blue-100" title="사용 가이드"><HelpCircle size={16} className="text-gray-400 hover:text-blue-500" /></button>
-                <button onClick={() => setIsSidebarOpen(false)} className="p-2 bg-gray-100 rounded-full md:hidden transition-colors active:bg-gray-200"><X size={20} /></button>
+                <button onClick={() => { if(window.innerWidth < 768) setMobileSheetState('hidden'); else setIsSidebarOpen(false); }} className="p-2 bg-gray-100 rounded-full md:hidden transition-colors active:bg-gray-200"><X size={20} /></button>
               </div>
             </div>
 
             {inputsCollapsed ? (
               <div className="space-y-3">
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5 overflow-hidden max-h-[24px] md:max-h-none">
                   <span className="text-[10px] font-black bg-blue-50 text-blue-600 px-2 py-1 rounded-full">{inputs.user1.workplace?.name || '미선택'}</span>
                   <span className="text-[10px] font-black bg-gray-100 text-gray-500 px-2 py-1 rounded-full">{inputs.user1.salary}만</span>
-                  {mode === 'couple' && <span className="text-[10px] font-black bg-pink-50 text-pink-500 px-2 py-1 rounded-full">{inputs.user2.workplace?.name || ''} {inputs.user2.salary}만</span>}
                   <span className="text-[10px] font-black bg-gray-100 text-gray-500 px-2 py-1 rounded-full">주거비 {Math.round(housingRatio * 100)}%</span>
-                  <span className="text-[10px] font-black bg-gray-100 text-gray-500 px-2 py-1 rounded-full">{roomType === 'all' ? '전체' : roomType + '룸'}{buildingAge > 0 ? ` · ${buildingAge}년` : ''}</span>
                 </div>
-                <button onClick={() => setInputsCollapsed(false)} className="w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-[11px] font-black text-gray-500 flex items-center justify-center gap-1.5 transition-colors"><Settings2 size={13} /> 조건 수정</button>
+                <button onClick={() => { setInputsCollapsed(false); if(window.innerWidth < 768) setMobileSheetState('full'); }} className="w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-[11px] font-black text-gray-500 flex items-center justify-center gap-1.5 transition-colors"><Settings2 size={13} /> 조건 수정</button>
               </div>
             ) : (
             <div className="space-y-3 md:space-y-4">
@@ -513,30 +530,9 @@ function App() {
                 </div>
               )}
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between px-1">
-                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">소득 대비 주거비 한도</div>
-                  <div className={`text-[11px] font-black ${getBudgetStatus(housingRatio).color}`}>
-                    {getBudgetStatus(housingRatio).icon} 월 {Math.round(((mode === 'couple' ? inputs.user1.salary + inputs.user2.salary : inputs.user1.salary) * housingRatio / 12))}만원 이내 ({getBudgetStatus(housingRatio).label})
-                  </div>
-                </div>
+                <div className="flex items-center justify-between px-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">소득 대비 주거비 한도</div><div className={`text-[11px] font-black ${getBudgetStatus(housingRatio).color}`}>{getBudgetStatus(housingRatio).icon} 월 {Math.round(((mode === 'couple' ? inputs.user1.salary + inputs.user2.salary : inputs.user1.salary) * housingRatio / 12))}만원 이내 ({getBudgetStatus(housingRatio).label})</div></div>
                 <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
-                  {[0.1, 0.2, 0.25, 0.3, 0.4].map((ratio) => {
-                    const status = getBudgetStatus(ratio);
-                    const isActive = housingRatio === ratio;
-                    return (
-                      <button 
-                        key={ratio} 
-                        onClick={() => setHousingRatio(ratio)} 
-                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all 
-                          ${isActive 
-                            ? `bg-white shadow-sm ${status.color}` 
-                            : 'text-gray-400 hover:text-gray-600'
-                          }`}
-                      >
-                        {Math.round(ratio * 100)}%
-                      </button>
-                    );
-                  })}
+                  {[0.1, 0.2, 0.25, 0.3, 0.4].map((ratio) => { const status = getBudgetStatus(ratio); return (<button key={ratio} onClick={() => setHousingRatio(ratio)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${housingRatio === ratio ? `bg-white shadow-sm ${status.color}` : 'text-gray-400 hover:text-gray-600'}`}>{Math.round(ratio * 100)}%</button>); })}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -561,36 +557,19 @@ function App() {
                   const monthlyIncome = ((mode === 'couple' ? inputs.user1.salary + inputs.user2.salary : inputs.user1.salary) * 10000 / 12) / 10000;
                   const actualRatio = topApt?.fixed_monthly_exp / monthlyIncome;
                   const status = getBudgetStatus(actualRatio);
-
                   return (
                   <div key={i} className={`transition-all rounded-[1.5rem] border overflow-hidden ${expandedSpotIndex === i ? 'bg-white border-blue-200 shadow-xl ring-1 ring-blue-100' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
                     <button onClick={() => handleSpotClick(spot, i)} className="w-full p-4 pb-3 text-left">
                       <div className="flex justify-between items-start mb-3">
                         <div className="flex items-center space-x-3">
                           <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${i === 0 ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-400'}`}>{i === 0 ? <Trophy size={16} /> : i + 1}</div>
-                          <div>
-                            <div className="text-[9px] font-black text-blue-500 uppercase tracking-tighter mb-0.5">{spot.name} 인근</div>
-                            <h6 className="text-[14px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[180px]">{topApt?.name}</h6>
-                          </div>
+                          <div><div className="text-[9px] font-black text-blue-500 uppercase tracking-tighter mb-0.5">{spot.name} 인근</div><h6 className="text-[14px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[180px]">{topApt?.name}</h6></div>
                         </div>
-                        <div className="text-right shrink-0 ml-2">
-                          <div className={`text-[9px] font-black px-2 py-0.5 rounded-full ${status.bg} ${status.color} border ${status.border} mb-1 inline-block`}>
-                            소득의 {Math.round(actualRatio * 100)}% ({status.label})
-                          </div>
-                          <div className="text-[12px] font-black text-gray-700 tracking-tight">{topApt?.display_price_value}</div>
-                        </div>
+                        <div className="text-right shrink-0 ml-2"><div className={`text-[9px] font-black px-2 py-0.5 rounded-full ${status.bg} ${status.color} border ${status.border} mb-1 inline-block`}>소득의 {Math.round(actualRatio * 100)}% ({status.label})</div><div className="text-[12px] font-black text-gray-700 tracking-tight">{topApt?.display_price_value}</div></div>
                       </div>
                       <div className="flex gap-2">
-                        <div className="flex-1 bg-gray-50 rounded-xl p-2.5 text-center border border-gray-100">
-                          <div className="text-[8px] font-black text-gray-400 uppercase mb-1">실제 지출</div>
-                          <div className="text-[18px] font-black text-gray-900 tracking-tighter leading-none">{topApt?.fixed_monthly_exp}<span className="text-[11px] text-gray-400 ml-0.5">만</span></div>
-                          <div className="text-[8px] font-bold text-gray-300 mt-0.5">주거비 + 교통비</div>
-                        </div>
-                        <div className="flex-1 bg-orange-50 rounded-xl p-2.5 text-center border border-orange-100">
-                          <div className="text-[8px] font-black text-orange-500 uppercase mb-1">보이지 않는 비용</div>
-                          <div className="text-[18px] font-black text-orange-600 tracking-tighter leading-none">{topApt?.hidden_life_cost}<span className="text-[11px] text-orange-400 ml-0.5">만</span></div>
-                          <div className="text-[8px] font-bold text-orange-300 mt-0.5">당신의 시간 가치</div>
-                        </div>
+                        <div className="flex-1 bg-gray-50 rounded-xl p-2.5 text-center border border-gray-100"><div className="text-[8px] font-black text-gray-400 uppercase mb-1">실제 지출</div><div className="text-[18px] font-black text-gray-900 tracking-tighter leading-none">{topApt?.fixed_monthly_exp}<span className="text-[11px] text-gray-400 ml-0.5">만</span></div><div className="text-[8px] font-bold text-gray-300 mt-0.5">주거비 + 교통비</div></div>
+                        <div className="flex-1 bg-orange-50 rounded-xl p-2.5 text-center border border-orange-100"><div className="text-[8px] font-black text-orange-500 uppercase mb-1">보이지 않는 비용</div><div className="text-[18px] font-black text-orange-600 tracking-tighter leading-none">{topApt?.hidden_life_cost}<span className="text-[11px] text-orange-400 ml-0.5">만</span></div><div className="text-[8px] font-bold text-orange-300 mt-0.5">당신의 시간 가치</div></div>
                       </div>
                       <div className="flex items-center gap-2 mt-2.5">
                         <div className="flex items-center gap-1 bg-blue-50 px-2 py-1 rounded-lg">{inputs.user1.transport === 'car' ? <Car size={10} className="text-blue-500" /> : <Bus size={10} className="text-blue-500" />}<span className="text-[10px] font-black text-blue-600">{spot.commute_time_1}분</span></div>
@@ -622,7 +601,7 @@ function App() {
                             ))}
                           </div>
                         )}
-                        <button onClick={() => {const c = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0]; if(c) window.open(getNaverLandUrl(c.name), '_blank');}} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3.5 rounded-xl text-xs transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg"><ExternalLink size={14} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span></button>
+                        <button onClick={() => {const c = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0]; if(c) window.open(getNaverLandUrl(c.name), '_blank');}} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3 rounded-xl text-xs transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg"><ExternalLink size={14} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span></button>
                       </div>
                     )}
                   </div>
@@ -648,27 +627,24 @@ function App() {
         </div>
       </div>
 
-      {results && !isSidebarOpen && (
+      {results && mobileSheetState === 'hidden' && (
         <div className="md:hidden absolute bottom-6 inset-x-0 z-[1100] flex overflow-x-auto no-scrollbar gap-4 px-4 snap-x">
-          {results.map((spot, i) => {
-            const topApt = spot.complexes[0];
-            return (
+          {results.map((spot, i) => (
             <div key={i} onClick={() => handleSpotClick(spot, i)} className={`flex-none w-[80vw] snap-center bg-white/90 backdrop-blur-xl p-5 rounded-[2rem] shadow-2xl border-2 transition-all ${expandedSpotIndex === i ? 'border-blue-500' : 'border-transparent'}`}>
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black ${i === 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{i + 1}</div>
-                  <div><div className="text-[10px] font-black text-blue-500 uppercase">{spot.name} 인근</div><h6 className="text-base font-black tracking-tight truncate w-32">{topApt?.name}</h6></div>
+                  <div><div className="text-[10px] font-black text-blue-500 uppercase">{spot.name} 인근</div><h6 className="text-base font-black tracking-tight truncate w-32">{spot.complexes[0]?.name}</h6></div>
                 </div>
                 <div className="text-right"><div className="text-[18px] font-black text-gray-900 leading-none">월 {spot.total_cost}만</div><div className="text-[9px] font-black text-gray-300 uppercase mt-1">총 손실 비용</div></div>
               </div>
             </div>
-            );
-          })}
+          ))}
         </div>
       )}
 
-      <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden absolute bottom-8 right-6 z-[1100] w-14 h-14 bg-gray-900 text-white rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all border-2 border-white/20">
-        {isSidebarOpen ? <X size={24} /> : (results ? <List size={24} /> : <Search size={24} />)}
+      <button onClick={() => setMobileSheetState(prev => prev === 'hidden' ? 'peek' : 'full')} className="md:hidden absolute bottom-8 right-6 z-[1100] w-14 h-14 bg-gray-900 text-white rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all border-2 border-white/20">
+        {mobileSheetState === 'full' ? <ChevronDown size={24} /> : (results ? <List size={24} /> : <Search size={24} />)}
       </button>
 
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
