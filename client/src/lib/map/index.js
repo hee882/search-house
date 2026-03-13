@@ -1,7 +1,7 @@
 import * as kakao from './providers/kakao';
 import * as naver from './providers/naver';
 
-const MAP_PROVIDER = import.meta.env.VITE_MAP_PROVIDER || 'kakao';
+const MAP_PROVIDER = import.meta.env.VITE_MAP_PROVIDER || 'naver';
 
 export function getProvider() {
   return MAP_PROVIDER === 'naver' ? naver : kakao;
@@ -21,6 +21,6 @@ export const addOverlay = (...args) => p.addOverlay(...args);
 export const clearMarkers = (...args) => p.clearMarkers(...args);
 export const geocodeAddress = (...args) => p.geocodeAddress(...args);
 export const drawPolyline = (...args) => p.drawPolyline(...args);
-export const setBounds = (...args) => p.setBounds(...args);
+export const setBounds = (map, points, padding) => p.setBounds(map, points, padding);
 export const getZoom = (...args) => p.getZoom(...args);
 export const setZoom = (...args) => p.setZoom(...args);

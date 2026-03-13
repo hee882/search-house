@@ -118,9 +118,36 @@ export async function geocodeAddress(query) {
           return;
         }
       }
-      // 네이버 클라이언트 API는 키워드 검색 미지원 → null 반환
-      // 키워드 검색이 필요하면 서버 사이드 Naver Search API 연동 필요
       resolve(null);
     });
+  });
+}
+
+export function drawPolyline(map, path, { color, style, weight }) {
+  if (!map || !window.naver?.maps) return null;
+  const naverMaps = window.naver.maps;
+  const polyline = new naverMaps.Polyline({
+    map,
+    path: path.map(p => new naverMaps.LatLng(p.lat, p.lng)),
+    strokeColor: color || '#3B82F6',
+    strokeWeight: weight || 5,
+    strokeOpacity: 0.8,
+    strokeStyle: style === 'dashed' ? 'dash' : 'solid',
+  });
+  return polyline;
+}
+
+export function setBounds(map, points, padding = {}) {
+  if (!map || !window.naver?.maps || !points || points.length === 0) return;
+  const naverMaps = window.naver.maps;
+  const bounds = new naverMaps.LatLngBounds();
+  points.forEach(p => bounds.extend(new naverMaps.LatLng(p.lat, p.lng)));
+  
+  // padding: { top, right, bottom, left }
+  map.fitBounds(bounds, {
+    top: padding.top || 100,
+    right: padding.right || 100,
+    bottom: padding.bottom || 100,
+    left: padding.left || 100
   });
 }

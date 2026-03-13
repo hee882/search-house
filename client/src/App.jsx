@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, ShieldCheck, List, Settings2, Train, X, HelpCircle, DollarSign, Home, Calculator, TrendingUp, AlertTriangle } from 'lucide-react';
+import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, ShieldCheck, List, Settings2, Train, X, HelpCircle, DollarSign, Home, Calculator, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds, getZoom, setZoom } from './lib/map';
 
 // 지하철 호선별 공식 색상
@@ -19,14 +19,6 @@ const LINE_COLORS = {
 
 const getLineColor = (line) => LINE_COLORS[line.trim()] || '#A0AEC0';
 const getShortLineName = (line) => line.trim();
-
-const getNaverLandUrl = (name) => {
-  const q = encodeURIComponent((name || '').trim());
-  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  return isMobile
-    ? `https://m.land.naver.com/search?query=${q}`
-    : `https://fin.land.naver.com/search?query=${q}`;
-};
 
 function LineBadge({ line }) {
   if (!line) return null;
@@ -61,11 +53,20 @@ const STATION_ALIASES = {
   '잠실역': ['신천역', '잠실새내역'],
 };
 
+const getNaverLandUrl = (name) => {
+  const q = encodeURIComponent((name || '').trim());
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  return isMobile
+    ? `https://m.land.naver.com/search?query=${q}`
+    : `https://fin.land.naver.com/search?query=${q}`;
+};
+
 function StationSearch({ value, onChange, placeholder, stations, icon: IconComponent, colorClass, stationLoading, stationError, onRetry }) {
   const [keyword, setKeyword] = useState(value?.name || "");
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const dropdownRef = useRef(null);
+  const listRef = useRef(null);
 
   const filteredStations = useMemo(() => {
     if (!keyword || keyword === value?.name) return stations.slice(0, 5);
@@ -96,12 +97,6 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
       .slice(0, 10);
   }, [keyword, stations, value]);
 
-  useEffect(() => {
-    const handleClickOutside = (e) => { if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setIsOpen(false); };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
   const handleSelect = (station) => {
     onChange(station);
     setKeyword(station.name);
@@ -109,27 +104,40 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
     setSelectedIndex(-1);
   };
 
-  const listRef = useRef(null);
   const handleKeyDown = (e) => {
-    if (!isOpen) { if (e.key === 'ArrowDown' || e.key === 'Enter') { setIsOpen(true); setSelectedIndex(0); } return; }
+    if (!isOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter') setIsOpen(true);
+      return;
+    }
     const list = filteredStations;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setSelectedIndex(prev => {
         const next = Math.min(prev + 1, list.length - 1);
-        requestAnimationFrame(() => listRef.current?.children[next + 1]?.scrollIntoView({ block: 'nearest' }));
+        listRef.current?.children[next]?.scrollIntoView({ block: 'nearest' });
         return next;
       });
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedIndex(prev => {
         const next = Math.max(prev - 1, 0);
-        requestAnimationFrame(() => listRef.current?.children[next + 1]?.scrollIntoView({ block: 'nearest' }));
+        listRef.current?.children[next]?.scrollIntoView({ block: 'nearest' });
         return next;
       });
-    } else if ((e.key === 'Enter' || e.key === 'Tab') && selectedIndex >= 0 && list[selectedIndex]) { e.preventDefault(); handleSelect(list[selectedIndex]); }
-    else if (e.key === 'Escape') { setIsOpen(false); setSelectedIndex(-1); }
+    } else if ((e.key === 'Enter' || e.key === 'Tab') && selectedIndex >= 0 && list[selectedIndex]) {
+      e.preventDefault();
+      handleSelect(list[selectedIndex]);
+    } else if (e.key === 'Escape') {
+      setIsOpen(false);
+      setSelectedIndex(-1);
+    }
   };
+
+  useEffect(() => {
+    const handleClickOutside = (e) => { if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setIsOpen(false); };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   return (
     <div className="relative group w-full" ref={dropdownRef}>
@@ -142,38 +150,31 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
         className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-transparent rounded-xl text-[13px] font-black focus:bg-white focus:border-blue-500 outline-none transition-all placeholder:text-gray-300"
         placeholder={placeholder}
       />
-      {isOpen && (stationLoading || stationError || filteredStations.length > 0) && (
-        <div ref={listRef} className="absolute bottom-full md:bottom-auto md:top-full left-0 w-full mb-2 md:mt-1.5 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 z-[2000] overflow-hidden max-h-[50vh] overflow-y-auto">
-          {stationLoading ? (
-            <div className="px-4 py-6 text-center"><Loader2 className="animate-spin mx-auto mb-2 text-blue-400" size={20} /><div className="text-[11px] font-bold text-gray-400">역 데이터 로딩 중...</div></div>
-          ) : stationError ? (
-            <div className="px-4 py-4 text-center"><div className="text-[11px] font-bold text-red-400 mb-2">데이터를 불러올 수 없습니다</div><button onClick={onRetry} className="text-[11px] font-black text-blue-500 hover:underline">재시도</button></div>
-          ) : (
-          <>
-          <div className="px-4 py-1.5 bg-gray-50/50 text-[9px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 text-center">
-            {!keyword ? '주요 거점 추천' : '검색 결과'}
+      {isOpen && (
+        <div className="absolute bottom-full md:bottom-auto md:top-full left-0 w-full mb-2 md:mt-1.5 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 z-[2000] overflow-hidden">
+          <div className="px-4 py-1.5 bg-gray-50/50 text-[9px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 text-center flex justify-between items-center">
+            <span>{stationLoading ? '데이터 로딩 중...' : (!keyword ? '주요 거점 추천' : '검색 결과')}</span>
+            {stationError && <button onClick={onRetry} className="text-blue-600 hover:underline">재시도</button>}
           </div>
-          {filteredStations.map((s, i) => (
-            <button key={i} onClick={() => handleSelect(s)} onMouseEnter={() => setSelectedIndex(i)} className={`w-full text-left px-4 py-3 flex items-center gap-4 transition-all duration-200 ${selectedIndex === i ? 'bg-blue-50/80 border-l-[4px] border-blue-500 pl-3' : 'text-gray-600 border-b border-gray-50 last:border-0'}`}>
-              <div className={`shrink-0 p-2 rounded-xl transition-colors ${selectedIndex === i ? 'bg-white shadow-sm' : 'bg-gray-100'}`}>
-                <Train className={`h-4 w-4 ${selectedIndex === i ? 'text-blue-500' : 'text-gray-400'}`} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className={`text-[15px] font-black tracking-tight truncate ${selectedIndex === i ? 'text-blue-700' : 'text-gray-800'}`}>
-                  {s.name}
-                  {STATION_ALIASES[s.name] && (
-                    <span className="ml-1.5 text-[12px] font-bold text-gray-400 group-hover:text-blue-400">
-                      ({STATION_ALIASES[s.name][0].replace('역', '')})
-                    </span>
-                  )}
-                </div>
-                <div className="mt-1 flex items-center gap-2 overflow-x-auto no-scrollbar">
-                  <LineBadge line={s.line} />
-                </div>
-              </div>
-            </button>
-          ))}
-          </>
+          {stationLoading ? (
+            <div className="p-8 flex justify-center"><Loader2 className="animate-spin text-blue-500" size={20} /></div>
+          ) : (
+            <div ref={listRef} className="max-h-[300px] overflow-y-auto custom-scrollbar">
+              {filteredStations.map((s, i) => (
+                <button key={i} onClick={() => handleSelect(s)} onMouseEnter={() => setSelectedIndex(i)} className={`w-full text-left px-4 py-3 flex items-center gap-4 transition-all duration-200 ${selectedIndex === i ? 'bg-blue-50/80 border-l-[4px] border-blue-500 pl-3' : 'text-gray-600 border-b border-gray-50 last:border-0'}`}>
+                  <div className={`shrink-0 p-2 rounded-xl transition-colors ${selectedIndex === i ? 'bg-white shadow-sm' : 'bg-gray-100'}`}>
+                    <Train className={`h-4 w-4 ${selectedIndex === i ? 'text-blue-500' : 'text-gray-400'}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className={`text-[15px] font-black tracking-tight truncate ${selectedIndex === i ? 'text-blue-700' : 'text-gray-800'}`}>
+                      {s.name}
+                      {STATION_ALIASES[s.name] && <span className="ml-1.5 text-[12px] font-bold text-gray-400">({STATION_ALIASES[s.name][0].replace('역', '')})</span>}
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 overflow-x-auto no-scrollbar"><LineBadge line={s.line} /></div>
+                  </div>
+                </button>
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -195,106 +196,35 @@ function HelpModal({ isOpen, onClose }) {
           <button onClick={onClose} className="p-1.5 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors"><X size={16} /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-          {/* Section 1: 서비스 개념 */}
           <div>
             <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><TrendingUp size={14} className="text-blue-600" /> 이 서비스는 무엇인가요?</h3>
             <p className="text-[11px] font-bold text-gray-500 leading-relaxed">
               <span className="text-gray-900 font-black">Search House</span>는 단순 집값 비교가 아닌, <span className="text-orange-600 font-black">통근 시간의 기회비용</span>까지 포함한 <span className="text-blue-600 font-black">진짜 주거 비용</span>을 계산하여 최적 입지를 추천합니다.
             </p>
-            <div className="mt-2 bg-orange-50 rounded-xl p-3 border border-orange-100">
-              <p className="text-[10px] font-black text-orange-700 leading-relaxed">
-                <AlertTriangle size={11} className="inline mr-1" />
-                매일 왕복 2시간 출퇴근 = 연간 <span className="text-orange-900">480시간</span> = <span className="text-orange-900">20일</span>을 도로 위에서 소비합니다. 그 시간을 당신의 시급으로 환산하면?
-              </p>
-            </div>
           </div>
-
-          {/* Section 2: 사용 방법 */}
-          <div>
-            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><Search size={14} className="text-blue-600" /> 사용 방법</h3>
-            <div className="space-y-2">
-              {[
-                ['1', '직장 근처 역을 검색하여 선택하세요', '초성 검색 지원 (ㄱㄴ → 강남역)'],
-                ['2', '연봉과 이동 수단을 입력하세요', '커플 모드는 두 사람 모두 입력'],
-                ['3', '소득 대비 주거비 비율을 설정하세요', '10%~40% 중 선택, 월 예산이 자동 계산'],
-                ['4', '방 타입과 준공 연수를 선택하세요', '면적 기준: 2룸(40~60m²), 3룸(60~85m²), 4룸+(85m²~)'],
-                ['5', '스마트 주거 탐색 시작!', '결과 카드를 클릭하면 지도에서 통근 경로를 확인'],
-              ].map(([step, title, desc]) => (
-                <div key={step} className="flex gap-2.5 items-start">
-                  <div className="w-5 h-5 bg-blue-600 rounded-lg flex items-center justify-center shrink-0 mt-0.5"><span className="text-[10px] font-black text-white">{step}</span></div>
-                  <div><div className="text-[11px] font-black text-gray-700">{title}</div><div className="text-[10px] font-bold text-gray-400">{desc}</div></div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Section 3: 핵심 산식 */}
           <div>
             <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><Calculator size={14} className="text-blue-600" /> 비용 산출 방식</h3>
             <div className="space-y-2.5">
               <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
                 <div className="text-[10px] font-black text-blue-600 uppercase mb-1">월 주거비</div>
                 <div className="text-[11px] font-black text-gray-800 font-mono">(보증금 × 4% ÷ 12) + 월세</div>
-                <div className="text-[9px] font-bold text-gray-400 mt-1">보증금의 연 4% 이자를 기회비용으로 반영</div>
               </div>
               <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                <div className="text-[10px] font-black text-orange-600 uppercase mb-1">숨은 생활비 (통근 기회비용)</div>
-                <div className="text-[11px] font-black text-gray-800 font-mono">(연봉 ÷ 12 ÷ 209h ÷ 60min) × 통근분 × 2회 × 20일</div>
-                <div className="text-[9px] font-bold text-gray-400 mt-1">당신의 인생 시급을 기준으로 매일 왕복 통근의 실질 가치</div>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                <div className="text-[10px] font-black text-red-500 uppercase mb-1">피로도 가중치 (Fatigue Model)</div>
-                <div className="text-[11px] font-black text-gray-800">45분 이상: <span className="text-orange-600">×1.15</span> · 60분 이상: <span className="text-red-600">×1.30</span></div>
-                <div className="text-[9px] font-bold text-gray-400 mt-1">장거리 통근은 피로 누적으로 실질 가치 손실이 가중</div>
+                <div className="text-[10px] font-black text-orange-600 uppercase mb-1">숨은 생활비</div>
+                <div className="text-[11px] font-black text-gray-800 font-mono">인생 시급 × 통근 시간(왕복) × 피로도 가중치</div>
               </div>
               <div className="bg-blue-50 rounded-xl p-3 border border-blue-100">
                 <div className="text-[10px] font-black text-blue-600 uppercase mb-1">총 기회비용</div>
-                <div className="text-[11px] font-black text-gray-800 font-mono">실제 지출(주거비+교통비) + 숨은 비용(시간 가치)</div>
-                <div className="text-[9px] font-bold text-gray-400 mt-1">이 값이 낮은 순서로 최적 입지를 추천합니다</div>
+                <div className="text-[11px] font-black text-gray-800 font-mono">실제 지출 + 숨은 비용</div>
               </div>
               <div className="pt-1">
-                <p className="text-[9px] font-black text-gray-400">※ 통근 시간은 네이버 API 기준 08:00 회사 도착, 18:00 회사 출발 시나리오를 바탕으로 실시간 교통정보를 반영하여 계산됩니다.</p>
+                <p className="text-[9px] font-black text-gray-400">※ 통근 시간은 네이버 API 기준 08:00 회사 도착, 18:00 회사 출발 시나리오를 시뮬레이션합니다.</p>
               </div>
             </div>
           </div>
-
-          {/* Section 4: 주거비 예산 */}
-          <div>
-            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><DollarSign size={14} className="text-blue-600" /> 주거비 한도란?</h3>
-            <p className="text-[11px] font-bold text-gray-500 leading-relaxed">
-              소득 대비 주거비 비율(10%~40%)을 설정하면, <span className="text-gray-900 font-black">월 예산 이내의 단지만</span> 추천합니다. 연봉이 높을수록, 비율이 높을수록 더 좋은 단지가 나타납니다.
-            </p>
-            <div className="mt-2 flex gap-2">
-              <div className="flex-1 bg-gray-50 p-2 rounded-lg text-center border border-gray-100">
-                <div className="text-[9px] font-black text-gray-400">연봉 3000만 × 30%</div>
-                <div className="text-[12px] font-black text-gray-700">월 75만</div>
-              </div>
-              <div className="flex-1 bg-gray-50 p-2 rounded-lg text-center border border-gray-100">
-                <div className="text-[9px] font-black text-gray-400">연봉 5000만 × 30%</div>
-                <div className="text-[12px] font-black text-gray-700">월 125만</div>
-              </div>
-              <div className="flex-1 bg-gray-50 p-2 rounded-lg text-center border border-gray-100">
-                <div className="text-[9px] font-black text-gray-400">연봉 8000만 × 30%</div>
-                <div className="text-[12px] font-black text-gray-700">월 200만</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 5: 데이터 출처 */}
-          <div>
-            <h3 className="text-[13px] font-black text-gray-900 mb-2 flex items-center gap-1.5"><Home size={14} className="text-blue-600" /> 데이터 안내</h3>
-            <div className="text-[11px] font-bold text-gray-500 leading-relaxed space-y-1">
-              <p>· 실거래가 데이터: <span className="text-gray-900 font-black">국토교통부 공식 API</span> (매일 자동 갱신)</p>
-              <p>· 대상: 수도권 620+ 지하철역 인근 <span className="text-gray-900 font-black">전월세 실거래</span></p>
-              <p>· 거래 5건 이상의 단지만 표시 (통계 신뢰성 확보)</p>
-              <p>· 통근 시간: 직선 거리 기반 추정 (대중교통 20km/h, 자차 30km/h)</p>
-            </div>
-          </div>
-
-          {/* Footer: Marketing */}
           <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-4 text-center text-white">
             <div className="text-[14px] font-black mb-1">집은 사는 곳이 아니라, 사는 방식입니다</div>
-            <p className="text-[10px] font-bold text-blue-200 leading-relaxed">당신의 시간, 에너지, 그리고 삶의 질까지 고려한<br/>스마트한 주거 의사결정을 Search House와 함께하세요.</p>
+            <p className="text-[10px] font-bold text-blue-200 leading-relaxed">당신의 삶의 가치까지 고려한 스마트한 주거 탐색</p>
           </div>
         </div>
       </div>
@@ -306,7 +236,7 @@ function App() {
   const [mapCenter] = useState({ lat: 37.5665, lng: 126.9780 });
   const [zoomLevel] = useState(15);
   const [mode, setMode] = useState('single');
-  const [residentType, setResidentType] = useState('buy');
+  const [residentType] = useState('buy');
   const [housingRatio, setHousingRatio] = useState(0.25);
   const [roomType, setRoomType] = useState('all');
   const [buildingAge, setBuildingAge] = useState(0);
@@ -335,15 +265,14 @@ function App() {
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://search-house.onrender.com';
 
   const fetchStations = useCallback(async () => {
-    setStationLoading(true);
-    setStationError(null);
+    setStationLoading(true); setStationError(null);
     for (let i = 0; i < 3; i++) {
       try {
         const res = await fetch(`${API_BASE_URL}/api/stations`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (data.length > 0) { setStationList(data); setStationLoading(false); return; }
-        throw new Error('빈 데이터');
+        throw new Error('데이터 없음');
       } catch (e) {
         if (i === 2) { setStationError(e.message); setStationLoading(false); return; }
         await new Promise(r => setTimeout(r, 1500 * (i + 1)));
@@ -360,16 +289,17 @@ function App() {
     const pts = [{ lat: spot.lat, lng: spot.lng }];
     if (workplaceLocs.user1) {
       pts.push(workplaceLocs.user1);
-      const p1 = drawPolyline(map, [{ lat: spot.lat, lng: spot.lng }, { lat: workplaceLocs.user1.lat, lng: workplaceLocs.user1.lng }], { color: '#3B82F6', style: 'dashed', weight: 5, label: `나: ${spot.commute_time_1}분` });
+      const p1 = drawPolyline(map, [{ lat: spot.lat, lng: spot.lng }, { lat: workplaceLocs.user1.lat, lng: workplaceLocs.user1.lng }], { color: '#3B82F6', style: 'dashed', weight: 5 });
       if (p1) pathsRef.current.push(p1);
     }
     if (mode === 'couple' && workplaceLocs.user2) {
       pts.push(workplaceLocs.user2);
-      const p2 = drawPolyline(map, [{ lat: spot.lat, lng: spot.lng }, { lat: workplaceLocs.user2.lat, lng: workplaceLocs.user2.lng }], { color: '#EC4899', style: 'dashed', weight: 5, label: `배우자: ${spot.commute_time_2}분` });
+      const p2 = drawPolyline(map, [{ lat: spot.lat, lng: spot.lng }, { lat: workplaceLocs.user2.lat, lng: workplaceLocs.user2.lng }], { color: '#EC4899', style: 'dashed', weight: 5 });
       if (p2) pathsRef.current.push(p2);
     }
-    setBounds(map, pts);
-  }, [map]);
+    const padding = { left: window.innerWidth >= 768 && isSidebarOpen ? 460 : 60, right: 60, top: 60, bottom: 60 };
+    setBounds(map, pts, padding);
+  }, [map, isSidebarOpen]);
 
   const handleSpotClick = useCallback((spot, index) => {
     const isAlreadyExpanded = expandedSpotIndex === index;
@@ -383,10 +313,11 @@ function App() {
       pathsRef.current = [];
       const allPts = [...results, workplaceLocs.user1];
       if (workplaceLocs.user2) allPts.push(workplaceLocs.user2);
-      setBounds(map, allPts);
+      const padding = { left: window.innerWidth >= 768 && isSidebarOpen ? 460 : 60, right: 60, top: 60, bottom: 60 };
+      setBounds(map, allPts, padding);
       setTimeout(() => { const currentZoom = getZoom(map); setZoom(map, currentZoom - 2); }, 300);
     }
-  }, [expandedSpotIndex, workplaceLocs, mode, drawCommutePaths, results, map]);
+  }, [expandedSpotIndex, workplaceLocs, mode, drawCommutePaths, results, map, isSidebarOpen]);
 
   useEffect(() => {
     if (!map || !isReady) return;
@@ -398,13 +329,13 @@ function App() {
         const zIndex = isSelected ? 1000 : (100 - index);
         const content = `
           <div style="cursor:pointer; position: absolute; left: 0; bottom: 40px; transform: translateX(-50%); z-index: ${zIndex};" onclick="window.dispatchSpotClick(${index})">
-            <div style="background:${isSelected ? '#3B82F6' : 'rgba(31,41,55,0.9)'}; backdrop-filter: blur(8px); color:white; padding: 10px 18px; border-radius: 40px; font-weight: 900; font-size: 14px; white-space: nowrap; border: 2.5px solid ${isSelected ? '#FACC15' : 'white'}; box-shadow: 0 12px 30px rgba(0,0,0,0.25); transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); ${isSelected ? 'transform: scale(1.1);' : ''}">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <span style="font-size: 16px;">${index === 0 ? '🏆' : (index+1)}</span>
+            <div style="background:${isSelected ? '#3B82F6' : 'rgba(31,41,55,0.9)'}; backdrop-filter: blur(8px); color:white; padding: 8px 14px; border-radius: 40px; font-weight: 900; font-size: 13px; white-space: nowrap; border: 2.5px solid ${isSelected ? '#FACC15' : 'white'}; box-shadow: 0 12px 30px rgba(0,0,0,0.25); transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); ${isSelected ? 'transform: scale(1.1);' : ''}">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span style="font-size: 14px;">${index === 0 ? '🏆' : (index+1)}</span>
                 <span style="letter-spacing: -0.02em;">${spot.name}</span>
               </div>
             </div>
-            <div style="width: 3px; height: 12px; background: ${isSelected ? '#FACC15' : 'white'}; margin: 0 auto; box-shadow: 0 2px 5px rgba(0,0,0,0.2);"></div>
+            <div style="width: 3px; height: 10px; background: ${isSelected ? '#FACC15' : 'white'}; margin: 0 auto;"></div>
           </div>
         `;
         const overlay = addOverlay(map, { lat: spot.lat, lng: spot.lng, content });
@@ -421,71 +352,44 @@ function App() {
     }
   }, [map, isReady, results, workplaceLocs, mode, expandedSpotIndex]);
 
-  useEffect(() => {
-    window.dispatchSpotClick = (index) => { if (results && results[index]) handleSpotClick(results[index], index); };
-  }, [results, handleSpotClick]);
+  useEffect(() => { window.dispatchSpotClick = (index) => { if (results && results[index]) handleSpotClick(results[index], index); }; }, [results, handleSpotClick]);
 
   const handleSearch = async () => {
     if (!inputs.user1.workplace) { alert("나의 직장 위치를 선택해 주세요."); return; }
-    
-    const sleep = (ms) => new Promise(res => setTimeout(ms > 0 ? res : res(), ms));
-    
+    const sleep = (ms) => new Promise(res => setTimeout(res, ms));
     setLoading(true);
     try {
       const loc1 = inputs.user1.workplace;
       const loc2 = mode === 'couple' ? inputs.user2.workplace : null;
       setWorkplaceLocs({ user1: loc1, user2: loc2 });
-      
       const areaMap = { all: [40, 200], '2': [40, 60], '3': [60, 85], '4': [85, 200] };
       const [minArea, maxArea] = areaMap[roomType] || areaMap.all;
       const payload = { mode, resident_type: residentType, housing_ratio: housingRatio, min_area: minArea, max_area: maxArea, max_building_age: buildingAge, user1: { workplace: loc1, salary: inputs.user1.salary, transport: inputs.user1.transport }, user2: loc2 ? { workplace: loc2, salary: inputs.user2.salary, transport: inputs.user2.transport } : null };
 
-      // 연출된 분석 단계 (Marketing UX)
-      setLoadingMessage("수도권 3만 개 단지 실거래 데이터 필터링 중...");
-      await sleep(800);
-      
-      setLoadingMessage(`${inputs.user1.salary}만원 연봉 기반 최적 예산 구간 산출 완료`);
-      await sleep(600);
-      
+      setLoadingMessage("수도권 3만 개 단지 실거래 데이터 필터링 중..."); await sleep(800);
+      setLoadingMessage(`${inputs.user1.salary}만원 연봉 기반 최적 예산 구간 산출 완료`); await sleep(600);
       setLoadingMessage("네이버 08:00 실시간 교통망 시뮬레이션 중...");
-      const fetchPromise = fetch(`${API_BASE_URL}/api/optimize`, { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify(payload) 
-      });
-      
-      await sleep(1200);
-      setLoadingMessage("기회비용 및 피로도 가중치 랭킹 산출 중...");
-      
-      const response = await fetchPromise;
-      const data = await response.json();
-      
-      await sleep(500);
-      setResults(data.results);
+      const fetchPromise = fetch(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      await sleep(1200); setLoadingMessage("기회비용 및 피로도 가중치 랭킹 산출 중...");
+      const response = await fetchPromise; const data = await response.json();
+      await sleep(500); setResults(data.results);
       if (data.results?.length > 0) setInputsCollapsed(true);
       if (window.innerWidth < 768) setIsSidebarOpen(false);
       
       if (data.results?.length > 0) {
         const allPts = [...data.results, loc1];
         if (loc2) allPts.push(loc2);
-        setBounds(map, allPts);
+        const padding = { left: window.innerWidth >= 768 && isSidebarOpen ? 460 : 60, right: 60, top: 60, bottom: 60 };
+        setBounds(map, allPts, padding);
         setTimeout(() => { const currentZoom = getZoom(map); setZoom(map, currentZoom - 2); }, 300);
-        setExpandedSpotIndex(0);
-        setExpandedComplexIdx(0);
+        setExpandedSpotIndex(0); setExpandedComplexIdx(0);
         setTimeout(() => { drawCommutePaths(data.results[0], { user1: loc1, user2: loc2 }, mode); }, 600);
       }
-    } catch (err) { 
-      console.error(err); 
-      alert("분석 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."); 
-    } finally { 
-      setLoading(false); 
-      setLoadingMessage(""); 
-    }
+    } catch (err) { console.error(err); alert("분석 중 오류가 발생했습니다."); } finally { setLoading(false); setLoadingMessage(""); }
   };
 
   return (
     <div className="relative w-full h-[100dvh] overflow-hidden antialiased bg-gray-50 text-gray-900 font-sans">
-      {/* 1. Map Layer */}
       <div ref={mapContainerRef} className="absolute inset-0 w-full h-full z-0 bg-gray-100 flex items-center justify-center">
         {!isReady && !mapError && (
           <div className="flex flex-col items-center space-y-4">
@@ -495,7 +399,6 @@ function App() {
         )}
       </div>
 
-      {/* Premium Loading Overlay */}
       {loading && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-white/70 backdrop-blur-md animate-in fade-in duration-300">
           <div className="flex flex-col items-center space-y-6 max-w-[280px] text-center">
@@ -516,20 +419,22 @@ function App() {
         </div>
       )}
 
-      {/* 2. Unified Sidebar/Bottom Sheet */}
       <div className={`absolute z-[1000] transition-all duration-500 ease-in-out flex flex-col 
         md:inset-y-0 md:left-0 md:w-[420px] md:bg-white md:border-r md:border-gray-100 md:shadow-2xl
         ${window.innerWidth < 768 
-          ? (isSidebarOpen ? 'inset-x-0 bottom-0 h-[85vh] bg-white rounded-t-[2.5rem] shadow-[0_-20px_60px_rgba(0,0,0,0.15)] overflow-hidden' : 'inset-x-0 bottom-[-100%]')
+          ? (isSidebarOpen ? 'inset-x-0 bottom-0 h-[85vh] bg-white rounded-t-[3rem] shadow-[0_-20px_60px_rgba(0,0,0,0.15)] overflow-hidden' : 'inset-x-0 bottom-[-100%]')
           : (isSidebarOpen ? 'translate-x-0' : '-translate-x-full')
         }
       `}>
-        <div className="flex flex-col h-full">
-          {/* Header Area - Fixed height to ensure visibility */}
+        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className={`hidden md:flex absolute top-1/2 -right-4 -translate-y-1/2 w-8 h-12 bg-white border border-gray-100 shadow-xl rounded-r-xl items-center justify-center text-gray-400 hover:text-blue-600 transition-all z-[1100]`}>
+          {isSidebarOpen ? <ChevronLeft size={20} strokeWidth={3} /> : <ChevronRight size={20} strokeWidth={3} className="ml-4" />}
+        </button>
+
+        <div className="flex flex-col h-full overflow-hidden relative">
           <div className="p-6 md:p-8 shrink-0 relative bg-white z-[100] border-b border-gray-50">
             <div className="flex items-center justify-between mb-4 md:mb-6">
               <div className="flex items-center space-x-3 cursor-pointer" onClick={() => window.location.reload()}>
-                <img src="logo.svg" alt="Logo" className="w-8 h-8 md:w-12 md:h-12" />
+                <img src="logo.svg" alt="Logo" className="w-10 h-10 md:w-12 md:h-12" />
                 <span className="text-lg md:text-2xl font-black uppercase tracking-tight">Search House</span>
               </div>
               <div className="flex items-center gap-2">
@@ -547,9 +452,7 @@ function App() {
                   <span className="text-[10px] font-black bg-gray-100 text-gray-500 px-2 py-1 rounded-full">주거비 {Math.round(housingRatio * 100)}%</span>
                   <span className="text-[10px] font-black bg-gray-100 text-gray-500 px-2 py-1 rounded-full">{roomType === 'all' ? '전체' : roomType + '룸'}{buildingAge > 0 ? ` · ${buildingAge}년` : ''}</span>
                 </div>
-                <button onClick={() => setInputsCollapsed(false)} className="w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-[11px] font-black text-gray-500 flex items-center justify-center gap-1.5 transition-colors">
-                  <Settings2 size={13} /> 조건 수정
-                </button>
+                <button onClick={() => setInputsCollapsed(false)} className="w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-[11px] font-black text-gray-500 flex items-center justify-center gap-1.5 transition-colors"><Settings2 size={13} /> 조건 수정</button>
               </div>
             ) : (
             <div className="space-y-3 md:space-y-4">
@@ -559,12 +462,10 @@ function App() {
                 </div>
                 <p className="text-[11px] font-bold text-gray-600 leading-tight">인생 시급과 워라밸 가치를 반영한 최적의 입지 분석</p>
               </div>
-
               <div className="flex p-1 bg-gray-100 rounded-xl">
                 <button onClick={() => setMode('single')} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${mode === 'single' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>1인 가구</button>
                 <button onClick={() => setMode('couple')} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${mode === 'couple' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}>부부/커플</button>
               </div>
-
               <div className="space-y-3">
                 <div className="space-y-1">
                   <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">직장 위치</div>
@@ -584,9 +485,8 @@ function App() {
                   </div>
                 </div>
               </div>
-
               {mode === 'couple' && (
-                <div className="space-y-3 pt-3 border-t border-gray-50 animate-in fade-in">
+                <div className="space-y-3 pt-3 border-t border-gray-100 animate-in fade-in">
                   <div className="space-y-1">
                     <div className="text-[10px] font-black text-pink-400 uppercase tracking-widest pl-1">배우자 직장</div>
                     <StationSearch stations={stationList} value={inputs.user2.workplace} onChange={(val) => setInputs({...inputs, user2: {...inputs.user2, workplace: val}})} placeholder="배우자 직장 위치" icon={MapPin} colorClass="text-pink-500" stationLoading={stationLoading} stationError={stationError} onRetry={fetchStations} />
@@ -606,59 +506,24 @@ function App() {
                   </div>
                 </div>
               )}
-
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between px-1">
-                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">소득 대비 주거비 한도</div>
-                  <div className="text-[11px] font-black text-blue-600">
-                    월 {Math.round(((mode === 'couple' ? inputs.user1.salary + inputs.user2.salary : inputs.user1.salary) * housingRatio / 12))}만원 이내
-                  </div>
-                </div>
+                <div className="flex items-center justify-between px-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">소득 대비 주거비 한도</div><div className="text-[11px] font-black text-blue-600">월 {Math.round(((mode === 'couple' ? inputs.user1.salary + inputs.user2.salary : inputs.user1.salary) * housingRatio / 12))}만원 이내</div></div>
                 <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
                   {[0.1, 0.2, 0.25, 0.3, 0.4].map((ratio) => (
-                    <button key={ratio} onClick={() => setHousingRatio(ratio)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${housingRatio === ratio ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}>
-                      {Math.round(ratio * 100)}%
-                    </button>
+                    <button key={ratio} onClick={() => setHousingRatio(ratio)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${housingRatio === ratio ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}>{Math.round(ratio * 100)}%</button>
                   ))}
                 </div>
               </div>
-
               <div className="flex gap-2">
-                <div className="flex-1 space-y-1">
-                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">방 타입</div>
-                  <div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">
-                    {[['all', '전체'], ['2', '2룸'], ['3', '3룸'], ['4', '4룸+']].map(([val, label]) => (
-                      <button key={val} onClick={() => setRoomType(val)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${roomType === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex-1 space-y-1">
-                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">준공</div>
-                  <div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">
-                    {[[0, '전체'], [5, '5년'], [10, '10년'], [20, '20년']].map(([val, label]) => (
-                      <button key={val} onClick={() => setBuildingAge(val)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${buildingAge === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <div className="flex-1 space-y-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">방 타입</div><div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">{[['all', '전체'], ['2', '2룸'], ['3', '3룸'], ['4', '4룸+']].map(([val, label]) => (<button key={val} onClick={() => setRoomType(val)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${roomType === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>{label}</button>))}</div></div>
+                <div className="flex-1 space-y-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">준공</div><div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">{[[0, '전체'], [5, '5년'], [10, '10년'], [20, '20년']].map(([val, label]) => (<button key={val} onClick={() => setBuildingAge(val)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${buildingAge === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>{label}</button>))}</div></div>
               </div>
-
-              <div className="pt-1 px-1">
-                <p className="text-[9px] font-black text-gray-300">※ 네이버 API 08:00 도착 / 18:00 출발 실시간 교통 반영</p>
-              </div>
-
-              <button onClick={handleSearch} disabled={loading || !isReady} className="w-full bg-gray-900 hover:bg-black text-white font-black py-4 rounded-xl shadow-xl active:scale-[0.98] flex items-center justify-center space-x-2 transition-all">
-                {loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} strokeWidth={3} />}
-                <span>스마트 주거 탐색 시작</span>
-              </button>
+              <div className="pt-1 px-1"><p className="text-[9px] font-black text-gray-300">※ 네이버 API 08:00 도착 / 18:00 출발 실시간 교통 반영</p></div>
+              <button onClick={handleSearch} disabled={loading || !isReady} className="w-full bg-gray-900 hover:bg-black text-white font-black py-4 rounded-xl shadow-xl active:scale-[0.98] flex items-center justify-center space-x-2 transition-all">{loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} strokeWidth={3} />}<span>스마트 주거 탐색 시작</span></button>
             </div>
             )}
           </div>
 
-          {/* Results Area - Scrollable within sidebar */}
           <div className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar space-y-3 border-t border-gray-50 bg-gray-50/30 pb-32">
             {results ? (
               <>
@@ -670,7 +535,6 @@ function App() {
                   const topApt = spot.complexes[0];
                   return (
                   <div key={i} className={`transition-all rounded-[1.5rem] border overflow-hidden ${expandedSpotIndex === i ? 'bg-white border-blue-200 shadow-xl ring-1 ring-blue-100' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
-                    {/* Card Header - Always visible */}
                     <button onClick={() => handleSpotClick(spot, i)} className="w-full p-4 pb-3 text-left">
                       <div className="flex justify-between items-start mb-3">
                         <div className="flex items-center space-x-3">
@@ -685,7 +549,6 @@ function App() {
                           <div className="text-[12px] font-black text-gray-700 tracking-tight">{topApt?.display_price_value}</div>
                         </div>
                       </div>
-                      {/* Cost comparison - the marketing hook */}
                       <div className="flex gap-2">
                         <div className="flex-1 bg-gray-50 rounded-xl p-2.5 text-center border border-gray-100">
                           <div className="text-[8px] font-black text-gray-400 uppercase mb-1">실제 지출</div>
@@ -698,41 +561,24 @@ function App() {
                           <div className="text-[8px] font-bold text-orange-300 mt-0.5">당신의 시간 가치</div>
                         </div>
                       </div>
-                      {/* Commute badges */}
                       <div className="flex items-center gap-2 mt-2.5">
-                        <div className="flex items-center gap-1 bg-blue-50 px-2 py-1 rounded-lg">
-                          {inputs.user1.transport === 'car' ? <Car size={10} className="text-blue-500" /> : <Bus size={10} className="text-blue-500" />}
-                          <span className="text-[10px] font-black text-blue-600">{spot.commute_time_1}분</span>
-                        </div>
-                        {mode === 'couple' && spot.commute_time_2 > 0 && (
-                          <div className="flex items-center gap-1 bg-pink-50 px-2 py-1 rounded-lg">
-                            {inputs.user2.transport === 'car' ? <Car size={10} className="text-pink-500" /> : <Bus size={10} className="text-pink-500" />}
-                            <span className="text-[10px] font-black text-pink-600">{spot.commute_time_2}분</span>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1 bg-blue-50 px-2 py-1 rounded-lg">{inputs.user1.transport === 'car' ? <Car size={10} className="text-blue-500" /> : <Bus size={10} className="text-blue-500" />}<span className="text-[10px] font-black text-blue-600">{spot.commute_time_1}분</span></div>
+                        {mode === 'couple' && spot.commute_time_2 > 0 && (<div className="flex items-center gap-1 bg-pink-50 px-2 py-1 rounded-lg">{inputs.user2.transport === 'car' ? <Car size={10} className="text-pink-500" /> : <Bus size={10} className="text-pink-500" />}<span className="text-[10px] font-black text-pink-600">{spot.commute_time_2}분</span></div>)}
                         <div className="ml-auto text-[9px] font-black text-gray-300">월 총 {spot.total_cost}만 손실</div>
                         <ChevronDown size={14} className={`text-gray-300 transition-transform ${expandedSpotIndex === i ? 'rotate-180' : ''}`} />
                       </div>
                     </button>
-
-                    {/* Expanded Detail */}
                     {expandedSpotIndex === i && (
                       <div className="px-4 pb-4 animate-in slide-in-from-top-4 duration-500">
                         <div className="h-px bg-gray-100 mb-3" />
-                        {/* Other complexes */}
                         {spot.complexes.length > 1 && (
                           <div className="space-y-1.5 mb-3">
                             <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest px-1">같은 역세권 다른 단지</div>
                             {spot.complexes.map((apt, idx) => (
                               <div key={idx} onClick={() => setExpandedComplexIdx(idx)} className={`p-2.5 rounded-xl border transition-all cursor-pointer ${expandedComplexIdx === idx ? 'bg-blue-50 border-blue-200' : 'bg-gray-50/50 border-transparent'}`}>
                                 <div className="flex justify-between items-center gap-2">
-                                  <div className="flex items-center space-x-1.5 overflow-hidden">
-                                    <span className={`text-[12px] font-black tracking-tight truncate ${expandedComplexIdx === idx ? 'text-blue-700' : 'text-gray-700'}`}>{apt.name}</span>
-                                    <ExternalLink size={9} className="text-gray-300 shrink-0 hover:text-blue-500 transition-colors" onClick={(e) => { e.stopPropagation(); window.open(getNaverLandUrl(apt.name), '_blank'); }} />
-                                  </div>
-                                  <div className="text-right shrink-0">
-                                    <span className="text-[10px] font-black text-blue-600">{apt.display_price_value}</span>
-                                  </div>
+                                  <div className="flex items-center space-x-1.5 overflow-hidden"><span className={`text-[12px] font-black tracking-tight truncate ${expandedComplexIdx === idx ? 'text-blue-700' : 'text-gray-700'}`}>{apt.name}</span><ExternalLink size={9} className="text-gray-300 shrink-0 hover:text-blue-500 transition-colors" onClick={(e) => { e.stopPropagation(); window.open(getNaverLandUrl(apt.name), '_blank'); }} /></div>
+                                  <div className="text-right shrink-0"><span className="text-[10px] font-black text-blue-600">{apt.display_price_value}</span></div>
                                 </div>
                                 {expandedComplexIdx === idx && (
                                   <div className="mt-2 flex gap-1.5 animate-in fade-in duration-300">
@@ -745,9 +591,7 @@ function App() {
                             ))}
                           </div>
                         )}
-                        <button onClick={() => {const c = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0]; if(c) window.open(getNaverLandUrl(c.name), '_blank');}} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3 rounded-xl text-xs transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg">
-                          <ExternalLink size={14} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span>
-                        </button>
+                        <button onClick={() => {const c = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0]; if(c) window.open(getNaverLandUrl(c.name), '_blank');}} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3.5 rounded-xl text-xs transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg"><ExternalLink size={14} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span></button>
                       </div>
                     )}
                   </div>
@@ -773,32 +617,29 @@ function App() {
         </div>
       </div>
 
-      {/* 3. Mobile Result Carousel (Slider) */}
       {results && !isSidebarOpen && (
         <div className="md:hidden absolute bottom-6 inset-x-0 z-[1100] flex overflow-x-auto no-scrollbar gap-4 px-4 snap-x">
-          {results.map((spot, i) => (
+          {results.map((spot, i) => {
+            const topApt = spot.complexes[0];
+            return (
             <div key={i} onClick={() => handleSpotClick(spot, i)} className={`flex-none w-[80vw] snap-center bg-white/90 backdrop-blur-xl p-5 rounded-[2rem] shadow-2xl border-2 transition-all ${expandedSpotIndex === i ? 'border-blue-500' : 'border-transparent'}`}>
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black ${i === 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{i + 1}</div>
-                  <div><div className="text-[10px] font-black text-blue-500 uppercase">{spot.name} 인근</div><h6 className="text-base font-black tracking-tight truncate w-32">{spot.complexes[0]?.name}</h6></div>
+                  <div><div className="text-[10px] font-black text-blue-500 uppercase">{spot.name} 인근</div><h6 className="text-base font-black tracking-tight truncate w-32">{topApt?.name}</h6></div>
                 </div>
                 <div className="text-right"><div className="text-[18px] font-black text-gray-900 leading-none">월 {spot.total_cost}만</div><div className="text-[9px] font-black text-gray-300 uppercase mt-1">총 손실 비용</div></div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* 4. Unified Mobile FAB */}
-      <button
-        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-        className="md:hidden absolute bottom-8 right-6 z-[1100] w-14 h-14 bg-gray-900 text-white rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all border-2 border-white/20"
-      >
+      <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden absolute bottom-8 right-6 z-[1100] w-14 h-14 bg-gray-900 text-white rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all border-2 border-white/20">
         {isSidebarOpen ? <X size={24} /> : (results ? <List size={24} /> : <Search size={24} />)}
       </button>
 
-      {/* 5. Help Modal */}
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
     </div>
   );
