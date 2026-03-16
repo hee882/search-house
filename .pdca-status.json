@@ -1,18 +1,50 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-03-10T16:18:28.662Z",
-  "activeFeatures": [],
-  "primaryFeature": null,
-  "features": {},
+  "lastUpdated": "2026-03-13T10:20:00.000Z",
+  "activeFeatures": [
+    "precise-commute-algo"
+  ],
+  "primaryFeature": "precise-commute-algo",
+  "features": {
+    "backend-station-search-fix": {
+      "phase": 4,
+      "status": "completed",
+      "matchRate": 100
+    },
+    "housing-budget-filter": {
+      "phase": 4,
+      "status": "completed",
+      "matchRate": 100
+    },
+    "og-share-marketing": {
+      "phase": 4,
+      "status": "completed",
+      "matchRate": 100
+    },
+    "global-scan-precise-route": {
+      "phase": 4,
+      "status": "completed",
+      "matchRate": 100
+    },
+    "mobile-native-ux": {
+      "phase": 4,
+      "status": "completed",
+      "matchRate": 100
+    }
+  },
   "pipeline": {
-    "currentPhase": 1,
-    "level": "Starter",
-    "phaseHistory": []
+    "currentPhase": 4,
+    "level": "Dynamic",
+    "phaseHistory": [
+      { "phase": 1, "date": "2026-03-10" },
+      { "phase": 2, "date": "2026-03-11" },
+      { "phase": 3, "date": "2026-03-12" },
+      { "phase": 4, "date": "2026-03-13" }
+    ]
   },
   "session": {
     "startedAt": "2026-03-10T14:31:31.546Z",
-    "onboardingCompleted": false,
-    "lastActivity": "2026-03-10T14:31:31.546Z"
-  },
-  "history": []
+    "onboardingCompleted": true,
+    "lastActivity": "2026-03-13T10:20:00.000Z"
+  }
 }

@@ -1,7 +1,8 @@
 import sqlite3
 import os
 
-DB_PATH = "D:/workspace/search-house/server/data/search_house.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "data", "search_house.db")
 
 def init_db():
     """데이터베이스 및 테이블 초기화"""
@@ -9,26 +10,27 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # 실거래가 저장 테이블
+    # 1. 아파트 매매 실거래가 테이블
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            city_code TEXT,          -- 법정동 시군구 코드 (5자리)
-            dong_name TEXT,          -- 법정동명
-            apt_name TEXT,           -- 아파트명
-            exclusive_area REAL,     -- 전용면적
-            deal_amount INTEGER,     -- 거래금액 (만원)
+            city_code TEXT,
+            dong_name TEXT,
+            apt_name TEXT,
+            exclusive_area REAL,
+            deal_amount INTEGER,
             deal_year INTEGER,
             deal_month INTEGER,
             deal_day INTEGER,
             floor INTEGER,
             build_year INTEGER,
-            is_direct_deal TEXT,     -- 직거래 여부
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            is_direct_deal TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(city_code, apt_name, dong_name, deal_year, deal_month, deal_day, deal_amount, floor)
         )
     ''')
     
-    # 지역별 통계 테이블 (미리 계산해서 저장)
+    # 2. 지역별 통계 테이블
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS region_stats (
             region_name TEXT PRIMARY KEY,
@@ -37,8 +39,8 @@ def init_db():
             last_updated DATETIME
         )
     ''')
-    
-    # 전월세 실거래가 저장 테이블
+
+    # 3. 전월세 거래 테이블
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS rent_transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,10 +59,26 @@ def init_db():
             UNIQUE(city_code, apt_name, dong_name, deal_year, deal_month, deal_day, deposit, monthly_rent, floor)
         )
     ''')
+
+    # 4. 통근 시간 캐시 테이블 (Naver API 비용 절감용)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS commute_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_lat REAL,
+            from_lng REAL,
+            to_lat REAL,
+            to_lng REAL,
+            transport_mode TEXT,
+            duration_min INTEGER,
+            distance_km REAL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(from_lat, from_lng, to_lat, to_lng, transport_mode)
+        )
+    ''')
     
     conn.commit()
     conn.close()
-    print("Database initialized successfully.")
+    print(f"Database initialized successfully at: {DB_PATH}")
 
 if __name__ == "__main__":
     init_db()

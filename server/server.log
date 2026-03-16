@@ -1,0 +1,8 @@
+2026-03-16 10:10:57,205 [INFO] Loaded 620 stations
+2026-03-16 10:10:57,205 [INFO] Loaded 48 dong coordinates
+2026-03-16 10:10:57,254 [INFO] Loaded 620 stations
+2026-03-16 10:10:57,254 [INFO] Loaded 48 dong coordinates
+INFO:     Started server process [13212]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
