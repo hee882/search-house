@@ -116,6 +116,57 @@ def estimate_commute_time(distance_km, transport_mode):
     speed = 30 if transport_mode == 'car' else 20
     return int((distance_km / speed) * 60) + (5 if transport_mode == 'car' else 10)
 
+def _filter_complexes_by_iqr(raw_rows, min_samples=3):
+    """
+    단지별 GROUP_CONCAT 거래 데이터에 IQR 아웃라이어 제거 적용.
+    반환: [(apt_name, dong_name, city_code, avg_deposit, avg_rent, area, build_year), ...]
+    """
+    result = []
+    for row in raw_rows:
+        apt_name, dong_name, city_code = row[0], row[1], row[2]
+        price_pairs_str = row[3]  # "5000:240,10000:200,25000:140,..."
+        area, build_year = row[4], row[5]
+
+        if not price_pairs_str:
+            continue
+
+        pairs = []
+        for p in price_pairs_str.split(','):
+            try:
+                d, r = p.split(':')
+                pairs.append((int(d), int(r)))
+            except Exception:
+                continue
+
+        if len(pairs) < min_samples:
+            continue
+
+        deposits = [d for d, _ in pairs]
+
+        # IQR 계산 (보증금 기준)
+        if len(deposits) >= 4:
+            sd = sorted(deposits)
+            n = len(sd)
+            q1 = sd[n // 4]
+            q3 = sd[(3 * n) // 4]
+            iqr = q3 - q1
+            lower_bound = q1 - 1.5 * iqr
+
+            # 하한 아웃라이어 제거 (공공임대·갱신 이상치)
+            clean_pairs = [(d, r) for d, r in pairs if d >= lower_bound]
+        else:
+            clean_pairs = pairs
+
+        if len(clean_pairs) < min_samples:
+            continue
+
+        avg_d = int(sum(d for d, _ in clean_pairs) / len(clean_pairs))
+        avg_r = int(sum(r for _, r in clean_pairs) / len(clean_pairs))
+
+        result.append((apt_name, dong_name, city_code, avg_d, avg_r, area, build_year))
+
+    return result
+
 def get_nearest_stations(lat, lng, n=3, max_distance_km=2.0):
     """좌표 기준 가장 가까운 지하철역 top n 반환 (2km 이내)"""
     with_dist = []
@@ -388,14 +439,9 @@ async def optimize_location(request: OptimizeRequest):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # 주거비 필터링 및 임대단지 제외가 포함된 전역 쿼리
-        # 보증금 3000만원 미만 = 공공임대·갱신 특수계약으로 간주 제외
-        query = '''
-            SELECT apt_name, dong_name, city_code,
-                   AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent,
-                   exclusive_area, build_year
-            FROM rent_transactions
-            WHERE deal_year >= 2024
+        # 단지별 전체 거래를 GROUP_CONCAT으로 가져와 Python에서 IQR 아웃라이어 제거
+        # 보증금 3000만원 미만 = 공공임대·갱신 특수계약으로 간주 1차 제외
+        RENTAL_FILTER = """
             AND deposit >= 3000
             AND apt_name NOT LIKE '%임대%'
             AND apt_name NOT LIKE '%행복주택%'
@@ -410,45 +456,37 @@ async def optimize_location(request: OptimizeRequest):
             AND apt_name NOT LIKE '%기업형임대%'
             AND apt_name NOT LIKE '%도시형%'
             AND apt_name NOT LIKE '%오피스텔%'
-            AND exclusive_area >= ? AND exclusive_area <= ?
-        '''
+        """
+        area_filter = "AND exclusive_area >= ? AND exclusive_area <= ?"
+        year_filter = " AND build_year >= ?" if min_build_year > 0 else ""
+
+        raw_query = f"""
+            SELECT apt_name, dong_name, city_code,
+                   GROUP_CONCAT(deposit || ':' || monthly_rent) as price_pairs,
+                   exclusive_area, build_year
+            FROM rent_transactions
+            WHERE deal_year >= 2024
+            {RENTAL_FILTER}
+            {area_filter}
+            {year_filter}
+            GROUP BY apt_name, dong_name, city_code
+            HAVING COUNT(*) >= 3
+        """
         params = [request.min_area, request.max_area]
         if min_build_year > 0:
-            query += ' AND build_year >= ?'
             params.append(min_build_year)
-        
-        # 신뢰도 확보를 위해 최소 거래 건수를 5건으로 상향
-        query += ' GROUP BY apt_name, dong_name, city_code HAVING COUNT(*) >= 5'
-        cursor.execute(query, params)
-        all_complexes = cursor.fetchall()
-        
-        # 만약 결과가 없다면, 기준을 조금 완화 (거래량 3건으로 하향)
-        if not all_complexes:
-            query_fallback = '''
-                SELECT apt_name, dong_name, city_code,
-                       AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent,
-                       exclusive_area, build_year
-                FROM rent_transactions
-                WHERE deal_year >= 2024
-                AND deposit >= 3000
-                AND apt_name NOT LIKE '%임대%'
-                AND apt_name NOT LIKE '%행복주택%'
-                AND apt_name NOT LIKE '%LH%'
-                AND apt_name NOT LIKE '%SH%'
-                AND apt_name NOT LIKE '%국민임대%'
-                AND apt_name NOT LIKE '%영구임대%'
-                AND apt_name NOT LIKE '%장기전세%'
-                AND apt_name NOT LIKE '%시프트%'
-                AND apt_name NOT LIKE '%뉴스테이%'
-                AND apt_name NOT LIKE '%오피스텔%'
-                AND exclusive_area >= ? AND exclusive_area <= ?
-                GROUP BY apt_name, dong_name, city_code HAVING COUNT(*) >= 3
-            '''
-            cursor.execute(query_fallback, [request.min_area, request.max_area])
-            all_complexes = cursor.fetchall()
-            logger.info("Fallback activated: Search criteria relaxed to find results.")
 
+        cursor.execute(raw_query, params)
+        raw_rows = cursor.fetchall()
         conn.close()
+
+        # IQR 기반 아웃라이어 제거 후 클린 평균 산출
+        all_complexes = _filter_complexes_by_iqr(raw_rows, min_samples=3)
+
+        # 결과 없으면 IQR min_samples 완화해서 재시도 (거래량이 적은 지역 대응)
+        if not all_complexes:
+            logger.info("IQR 필터 후 결과 없음 → min_samples=2로 완화 재시도")
+            all_complexes = _filter_complexes_by_iqr(raw_rows, min_samples=2)
 
         # 3. 직선거리 기준 후보군 100개 추출 (Fast Scan)
         mid_lat = (request.user1.workplace.lat + (request.user2.workplace.lat if request.user2 else request.user1.workplace.lat)) / 2
