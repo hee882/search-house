@@ -64,12 +64,24 @@ export function setZoom(map, zoom) {
   map.setLevel(toKakaoLevel(zoom));
 }
 
-export function setBounds(map, points) {
+export function setBounds(map, points, padding = {}) {
   if (!map || !window.kakao?.maps || !points.length) return;
   const kakaoMaps = window.kakao.maps;
   const bounds = new kakaoMaps.LatLngBounds();
   points.forEach(p => bounds.extend(new kakaoMaps.LatLng(p.lat, p.lng)));
-  map.setBounds(bounds);
+  
+  // padding: { top, right, bottom, left }
+  if (Object.keys(padding).length > 0) {
+    map.setBounds(
+      bounds, 
+      padding.top || 0, 
+      padding.right || 0, 
+      padding.bottom || 0, 
+      padding.left || 0
+    );
+  } else {
+    map.setBounds(bounds);
+  }
 }
 
 export function getZoom(map) {
@@ -110,7 +122,8 @@ export function addOverlay(map, { lat, lng, content }) {
   return new kakaoMaps.CustomOverlay({
     position: new kakaoMaps.LatLng(lat, lng),
     content,
-    yAnchor: 1.2,
+    xAnchor: 0.5,
+    yAnchor: 1.0,
     map,
   });
 }

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, ShieldCheck, List, Settings2, Train, X, HelpCircle, DollarSign, Home, Calculator, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight, Coffee, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
-import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds, getZoom, setZoom, setCenter } from './lib/map';
+import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds, getZoom, setZoom, setCenter, geocodeAddress } from './lib/map';
 
 // 지하철 호선별 공식 색상
 const LINE_COLORS = {
@@ -60,9 +60,10 @@ const STATION_ALIASES = {
   '잠실역': ['신천역', '잠실새내역'],
 };
 
-const getNaverLandUrl = (name) => {
-  const q = encodeURIComponent((name || '').trim());
-  // 최신 네이버 부동산 통합 검색 경로 (가장 안정적)
+const getNaverLandUrl = (name, dong) => {
+  // 동이름 포함 시 검색 정확도 향상 (MOLIT 단지명과 네이버 명칭 차이 보완)
+  const query = dong ? `${dong} ${name}` : name;
+  const q = encodeURIComponent((query || '').trim());
   return `https://fin.land.naver.com/search?query=${q}`;
 };
 
@@ -386,14 +387,14 @@ function App() {
         const isSelected = expandedSpotIndex === index;
         const zIndex = isSelected ? 1000 : (100 - index);
         const content = `
-          <div style="cursor:pointer; position: absolute; left: 0; bottom: 40px; transform: translateX(-50%); z-index: ${zIndex};" onclick="window.dispatchSpotClick(${index})">
+          <div style="cursor:pointer; display: flex; flex-direction: column; align-items: center; z-index: ${zIndex};" onclick="window.dispatchSpotClick(${index})">
             <div style="background:${isSelected ? '#3B82F6' : 'rgba(31,41,55,0.9)'}; backdrop-filter: blur(8px); color:white; padding: 8px 14px; border-radius: 40px; font-weight: 900; font-size: 13px; white-space: nowrap; border: 2.5px solid ${isSelected ? '#FACC15' : 'white'}; box-shadow: 0 12px 30px rgba(0,0,0,0.25); transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); ${isSelected ? 'transform: scale(1.1);' : ''}">
               <div style="display:flex; align-items:center; gap:6px;">
                 <span style="font-size: 14px;">${index === 0 ? '🏆' : (index+1)}</span>
                 <span style="letter-spacing: -0.02em;">${spot.name}</span>
               </div>
             </div>
-            <div style="width: 3px; height: 10px; background: ${isSelected ? '#FACC15' : 'white'}; margin: 0 auto;"></div>
+            <div style="width: 3px; height: 10px; background: ${isSelected ? '#FACC15' : 'white'};"></div>
           </div>
         `;
         const overlay = addOverlay(map, { lat: spot.lat, lng: spot.lng, content });
@@ -440,22 +441,37 @@ function App() {
       const fetchPromise = fetch(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       await sleep(1200); setLoadingMessage("기회비용 및 피로도 가중치 랭킹 산출 중...");
       const response = await fetchPromise; const data = await response.json();
-      await sleep(500); setResults(data.results);
-      if (data.results?.length > 0) {
+
+      // 클라이언트 사이드 좌표 보정: 카카오 지도 JS SDK로 단지 정밀 위치 조회
+      setLoadingMessage("단지 위치 정밀 보정 중...");
+      const geocodedResults = await Promise.all(
+        (data.results || []).map(async (spot) => {
+          const dong = spot.complexes?.[0]?.dong || '';
+          const query = `${dong} ${spot.name}`.trim();
+          try {
+            const coords = await geocodeAddress(query);
+            if (coords) return { ...spot, lat: coords.lat, lng: coords.lng };
+          } catch (e) { /* 실패시 서버 좌표 유지 */ }
+          return spot;
+        })
+      );
+
+      await sleep(300); setResults(geocodedResults);
+      if (geocodedResults.length > 0) {
         setInputsCollapsed(true);
         if (window.innerWidth < 768) setMobileSheetState('hidden');
       } else {
         if (window.innerWidth < 768) setMobileSheetState('full');
       }
-      
-      if (data.results?.length > 0) {
-        const allPts = [...data.results, loc1];
+
+      if (geocodedResults.length > 0) {
+        const allPts = [...geocodedResults, loc1];
         if (loc2) allPts.push(loc2);
         const padding = { left: window.innerWidth >= 768 && isSidebarOpen ? 460 : 60, right: 60, top: 60, bottom: 60 };
         setBounds(map, allPts, padding);
         setTimeout(() => { const currentZoom = getZoom(map); setZoom(map, currentZoom - 2); }, 300);
         setExpandedSpotIndex(0); setExpandedComplexIdx(0);
-        setTimeout(() => { drawCommutePaths(data.results[0], { user1: loc1, user2: loc2 }, mode); }, 600);
+        setTimeout(() => { drawCommutePaths(geocodedResults[0], { user1: loc1, user2: loc2 }, mode); }, 600);
       }
     } catch (err) { console.error(err); alert("분석 중 오류가 발생했습니다."); } finally { setLoading(false); setLoadingMessage(""); }
   };
@@ -636,7 +652,7 @@ function App() {
                       <div className="flex justify-between items-start mb-3">
                         <div className="flex items-center space-x-3">
                           <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${i === 0 ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-400'}`}>{i === 0 ? <Trophy size={16} /> : i + 1}</div>
-                          <div><div className="text-[9px] font-black text-blue-500 uppercase tracking-tighter mb-0.5">{spot.name} 인근</div><h6 className="text-[14px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[180px]">{topApt?.name}</h6></div>
+                          <div><div className="text-[9px] font-black text-blue-500 uppercase tracking-tighter mb-0.5">{spot.nearest_stations?.length > 0 ? spot.nearest_stations.join(' / ') + ' 인근' : (spot.dong || spot.name) + ' 인근'}</div><h6 className="text-[14px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[180px]">{topApt?.name}</h6></div>
                         </div>
                         <div className="text-right shrink-0 ml-2"><div className={`text-[9px] font-black px-2 py-0.5 rounded-full ${status.bg} ${status.color} border ${status.border} mb-1 inline-block`}>소득의 {Math.round(actualRatio * 100)}% ({status.label})</div><div className="text-[12px] font-black text-gray-700 tracking-tight">{topApt?.display_price_value}</div></div>
                       </div>
@@ -692,7 +708,7 @@ function App() {
                             {spot.complexes.map((apt, idx) => (
                               <div key={idx} onClick={() => setExpandedComplexIdx(idx)} className={`p-2.5 rounded-xl border transition-all cursor-pointer ${expandedComplexIdx === idx ? 'bg-blue-50 border-blue-200' : 'bg-gray-50/50 border-transparent'}`}>
                                 <div className="flex justify-between items-center gap-2">
-                                  <div className="flex items-center space-x-1.5 overflow-hidden"><span className={`text-[12px] font-black tracking-tight truncate ${expandedComplexIdx === idx ? 'text-blue-700' : 'text-gray-700'}`}>{apt.name}</span><ExternalLink size={9} className="text-gray-300 shrink-0 hover:text-blue-500 transition-colors" onClick={(e) => { e.stopPropagation(); window.open(getNaverLandUrl(apt.name), '_blank'); }} /></div>
+                                  <div className="flex items-center space-x-1.5 overflow-hidden"><span className={`text-[12px] font-black tracking-tight truncate ${expandedComplexIdx === idx ? 'text-blue-700' : 'text-gray-700'}`}>{apt.name}</span><ExternalLink size={9} className="text-gray-300 shrink-0 hover:text-blue-500 transition-colors" onClick={(e) => { e.stopPropagation(); window.open(getNaverLandUrl(apt.name, apt.dong), '_blank'); }} /></div>
                                   <div className="text-right shrink-0"><span className="text-[10px] font-black text-blue-600">{apt.display_price_value}</span></div>
                                 </div>
                                 {expandedComplexIdx === idx && (
@@ -706,7 +722,7 @@ function App() {
                             ))}
                           </div>
                         )}
-                        <button onClick={() => {const c = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0]; if(c) window.open(getNaverLandUrl(c.name), '_blank');}} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3 rounded-xl text-xs transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg"><ExternalLink size={14} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span></button>
+                        <button onClick={() => {const c = spot.complexes?.[expandedComplexIdx] || spot.complexes?.[0]; if(c) window.open(getNaverLandUrl(c.name, c.dong), '_blank');}} className="w-full bg-gray-900 hover:bg-black text-white font-black py-3 rounded-xl text-xs transition-all flex items-center justify-center space-x-2 active:scale-95 shadow-lg"><ExternalLink size={14} strokeWidth={3} /> <span>네이버 부동산 매물 보기</span></button>
                       </div>
                     )}
                   </div>
@@ -767,7 +783,7 @@ function App() {
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black ${i === 0 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'}`}>{i + 1}</div>
-                    <div><div className="text-[10px] font-black text-blue-500 uppercase">{spot.name}</div><h6 className="text-[16px] font-black tracking-tighter truncate w-[40vw]">{topApt?.name}</h6></div>
+                    <div><div className="text-[10px] font-black text-blue-500 uppercase">{spot.nearest_stations?.length > 0 ? spot.nearest_stations.join(' / ') + ' 인근' : (spot.dong || spot.name) + ' 인근'}</div><h6 className="text-[16px] font-black tracking-tighter truncate w-[40vw]">{topApt?.name}</h6></div>
                   </div>
                   <div className="text-right">
                     <div className="text-[18px] font-black text-gray-900 leading-none">월 {spot.total_cost}만</div>
