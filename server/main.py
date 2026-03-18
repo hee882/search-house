@@ -9,8 +9,8 @@ import json
 import os
 import logging
 import sqlite3
-from datetime import datetime
-from lib.naver_api import get_precise_commute
+from datetime import datetime, timedelta
+from lib.kakao_api import get_kakao_commute
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -339,7 +339,17 @@ async def get_stations():
 @app.post("/api/optimize")
 async def optimize_location(request: OptimizeRequest):
     try:
-        # 1. 월 주거비 예산 계산 (만원 단위)
+        # 1. 날짜 및 시간 설정 (차주 월요일 기준)
+        now = datetime.now()
+        days_ahead = 0 - now.weekday()
+        if days_ahead <= 0: days_ahead += 7
+        next_monday = now + timedelta(days=days_ahead)
+        # 08:00 도착을 위해 보통 07:20분경 출발하는 피크 타임 설정
+        time_morning = next_monday.replace(hour=7, minute=20, second=0, microsecond=0).strftime("%Y%m%d%H%M")
+        # 18:00 정시 퇴근 피크 타임 설정
+        time_evening = next_monday.replace(hour=18, minute=0, second=0, microsecond=0).strftime("%Y%m%d%H%M")
+
+        # 2. 월 주거비 예산 계산 (만원 단위)
         total_salary = request.user1.salary
         if request.mode == 'couple' and request.user2:
             total_salary += request.user2.salary
@@ -353,13 +363,20 @@ async def optimize_location(request: OptimizeRequest):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # 주거비 필터링이 포함된 전역 쿼리
+        # 주거비 필터링 및 임대단지 제외가 포함된 전역 쿼리
         query = '''
             SELECT apt_name, dong_name, city_code, 
                    AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent,
                    exclusive_area, build_year
             FROM rent_transactions
             WHERE deal_year >= 2024
+            AND deposit >= 100 -- 100만원 미만 보증금(비정상/임대) 제외
+            AND apt_name NOT LIKE '%임대%'
+            AND apt_name NOT LIKE '%행복주택%'
+            AND apt_name NOT LIKE '%LH%'
+            AND apt_name NOT LIKE '%SH%'
+            AND apt_name NOT LIKE '%공공임대%'
+            AND apt_name NOT LIKE '%도시형%'
             AND exclusive_area >= ? AND exclusive_area <= ?
         '''
         params = [request.min_area, request.max_area]
@@ -367,24 +384,28 @@ async def optimize_location(request: OptimizeRequest):
             query += ' AND build_year >= ?'
             params.append(min_build_year)
         
-        query += ' GROUP BY apt_name, dong_name, city_code HAVING COUNT(*) >= 3'
+        # 신뢰도 확보를 위해 최소 거래 건수를 5건으로 상향
+        query += ' GROUP BY apt_name, dong_name, city_code HAVING COUNT(*) >= 5'
         cursor.execute(query, params)
         all_complexes = cursor.fetchall()
         
-        # 만약 결과가 없다면, 연식 필터를 해제하고 다시 시도 (지능형 폴백)
-        if not all_complexes and min_build_year > 0:
+        # 만약 결과가 없다면, 기준을 조금 완화 (거래량 3건으로 하향)
+        if not all_complexes:
             query_fallback = '''
                 SELECT apt_name, dong_name, city_code, 
                        AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent,
                        exclusive_area, build_year
                 FROM rent_transactions
                 WHERE deal_year >= 2024
+                AND deposit >= 100
+                AND apt_name NOT LIKE '%임대%'
+                AND apt_name NOT LIKE '%행복주택%'
                 AND exclusive_area >= ? AND exclusive_area <= ?
                 GROUP BY apt_name, dong_name, city_code HAVING COUNT(*) >= 3
             '''
             cursor.execute(query_fallback, [request.min_area, request.max_area])
             all_complexes = cursor.fetchall()
-            logger.info("Fallback activated: Age filter removed to find results.")
+            logger.info("Fallback activated: Search criteria relaxed to find results.")
 
         conn.close()
 
@@ -436,32 +457,48 @@ async def optimize_location(request: OptimizeRequest):
         top_candidates = candidates[:50]
 
         results = []
+        base_transport_cost = 10 # 기본 교통비
+
         for spot in top_candidates:
-            # 네이버 정밀 경로 분석 호출 (캐시 포함)
-            time1, dist1 = get_precise_commute(DB_PATH, spot['lat'], spot['lng'], request.user1.workplace.lat, request.user1.workplace.lng, request.user1.transport)
+            # 카카오 정밀 경로 분석 (출근/퇴근 각각)
+            # 출근: 08:00 도착 시뮬레이션
+            morning_time1, _ = get_kakao_commute(DB_PATH, spot['lat'], spot['lng'], request.user1.workplace.lat, request.user1.workplace.lng, request.user1.transport, goal_arrive_time="0800")
+            # 퇴근: 18:00 정시 출발
+            evening_time1, _ = get_kakao_commute(DB_PATH, request.user1.workplace.lat, request.user1.workplace.lng, spot['lat'], spot['lng'], request.user1.transport, departure_time=time_evening)
             
-            time2, dist2 = 0, 0
+            avg_time1 = (morning_time1 + evening_time1) // 2
+            
+            morning_time2, evening_time2, avg_time2 = 0, 0, 0
             if request.mode == 'couple' and request.user2:
-                time2, dist2 = get_precise_commute(DB_PATH, spot['lat'], spot['lng'], request.user2.workplace.lat, request.user2.workplace.lng, request.user2.transport)
+                morning_time2, _ = get_kakao_commute(DB_PATH, spot['lat'], spot['lng'], request.user2.workplace.lat, request.user2.workplace.lng, request.user2.transport, goal_arrive_time="0800")
+                evening_time2, _ = get_kakao_commute(DB_PATH, request.user2.workplace.lat, request.user2.workplace.lng, spot['lat'], spot['lng'], request.user2.transport, departure_time=time_evening)
+                avg_time2 = (morning_time2 + evening_time2) // 2
             
-            # 성향 가중치 적용 (money, balance, time)
+            # 기회비용 계산 (평균 시간 기준)
+            hidden_cost1 = calculate_hidden_life_cost(request.user1.salary, avg_time1)
+            hidden_cost2 = calculate_hidden_life_cost(request.user2.salary, avg_time2) if request.mode == 'couple' and request.user2 else 0
+            
+            # 성향 가중치 적용
             fixed_monthly_exp = spot['monthly_housing_cost'] + base_transport_cost
             total_hidden_life_cost = hidden_cost1 + hidden_cost2
             
             # 가중치 설정
             w_fixed, w_hidden = 1.0, 1.0
-            if request.preference == 'money':
-                w_fixed, w_hidden = 1.6, 0.4 # 돈 아끼는 게 최고 (고정비 중시)
-            elif request.preference == 'time':
-                w_fixed, w_hidden = 0.4, 1.6 # 시간 아끼는 게 최고 (직주근접 중시)
+            if request.preference == 'money': w_fixed, w_hidden = 1.6, 0.4
+            elif request.preference == 'time': w_fixed, w_hidden = 0.4, 1.6
             
-            # 최종 스코어 (낮을수록 좋음)
             weighted_score = int(fixed_monthly_exp * w_fixed + total_hidden_life_cost * w_hidden)
-            total_opp_cost = fixed_monthly_exp + total_hidden_life_cost # 표시용은 실제 합계
+            total_opp_cost = fixed_monthly_exp + total_hidden_life_cost
 
             results.append({
                 "name": spot['name'], "lat": spot['lat'], "lng": spot['lng'],
-                "total_cost": total_opp_cost, "commute_time_1": time1, "commute_time_2": time2,
+                "total_cost": total_opp_cost,
+                "commute_time_1": avg_time1,
+                "commute_morning_1": morning_time1,
+                "commute_evening_1": evening_time1,
+                "commute_time_2": avg_time2,
+                "commute_morning_2": morning_time2,
+                "commute_evening_2": evening_time2,
                 "complexes": [{
                     "name": spot['name'], "dong": spot['dong'], "rent_type": "전세" if spot['avg_rent'] == 0 else "월세",
                     "display_price_label": "전세" if spot['avg_rent'] == 0 else "월세",

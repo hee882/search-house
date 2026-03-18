@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, ShieldCheck, List, Settings2, Train, X, HelpCircle, DollarSign, Home, Calculator, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight, Coffee } from 'lucide-react';
+import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, ShieldCheck, List, Settings2, Train, X, HelpCircle, DollarSign, Home, Calculator, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight, Coffee, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds, getZoom, setZoom, setCenter } from './lib/map';
 
 // 지하철 호선별 공식 색상
@@ -19,6 +19,13 @@ const LINE_COLORS = {
 
 const getLineColor = (line) => LINE_COLORS[line.trim()] || '#A0AEC0';
 const getShortLineName = (line) => line.trim();
+
+const getTimeStatus = (minutes) => {
+  if (minutes <= 30) return { color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100', dot: 'bg-green-500' };
+  if (minutes <= 60) return { color: 'text-yellow-600', bg: 'bg-yellow-50', border: 'border-yellow-100', dot: 'bg-yellow-500' };
+  if (minutes <= 90) return { color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100', dot: 'bg-orange-500' };
+  return { color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100', dot: 'bg-red-500' };
+};
 
 function LineBadge({ line }) {
   if (!line) return null;
@@ -637,11 +644,43 @@ function App() {
                         <div className="flex-1 bg-gray-50 rounded-xl p-2.5 text-center border border-gray-100"><div className="text-[8px] font-black text-gray-400 uppercase mb-1">실제 지출</div><div className="text-[18px] font-black text-gray-900 tracking-tighter leading-none">{topApt?.fixed_monthly_exp}<span className="text-[11px] text-gray-400 ml-0.5">만</span></div><div className="text-[8px] font-bold text-gray-300 mt-0.5">주거비 + 교통비</div></div>
                         <div className="flex-1 bg-orange-50 rounded-xl p-2.5 text-center border border-orange-100"><div className="text-[8px] font-black text-orange-500 uppercase mb-1">보이지 않는 비용</div><div className="text-[18px] font-black text-orange-600 tracking-tighter leading-none">{topApt?.hidden_life_cost}<span className="text-[11px] text-orange-400 ml-0.5">만</span></div><div className="text-[8px] font-bold text-orange-300 mt-0.5">당신의 시간 가치</div></div>
                       </div>
-                      <div className="flex items-center gap-2 mt-2.5">
-                        <div className="flex items-center gap-1 bg-blue-50 px-2 py-1 rounded-lg">{inputs.user1.transport === 'car' ? <Car size={10} className="text-blue-500" /> : <Bus size={10} className="text-blue-500" />}<span className="text-[10px] font-black text-blue-600">{spot.commute_time_1}분</span></div>
-                        {mode === 'couple' && spot.commute_time_2 > 0 && (<div className="flex items-center gap-1 bg-pink-50 px-2 py-1 rounded-lg">{inputs.user2.transport === 'car' ? <Car size={10} className="text-pink-500" /> : <Bus size={10} className="text-pink-500" />}<span className="text-[10px] font-black text-pink-600">{spot.commute_time_2}분</span></div>)}
-                        <div className="ml-auto text-[9px] font-black text-gray-300">월 총 {spot.total_cost}만 손실</div>
-                        <ChevronDown size={14} className={`text-gray-300 transition-transform ${expandedSpotIndex === i ? 'rotate-180' : ''}`} />
+                      <div className="flex flex-col gap-1.5 mt-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all ${getTimeStatus(spot.commute_time_1).bg} ${getTimeStatus(spot.commute_time_1).border}`}>
+                            {inputs.user1.transport === 'car' ? <Car size={10} className={getTimeStatus(spot.commute_time_1).color} /> : <Bus size={10} className={getTimeStatus(spot.commute_time_1).color} />}
+                            <span className={`text-[11px] font-black ${getTimeStatus(spot.commute_time_1).color}`}>나: {spot.commute_time_1}분</span>
+                            <div className="flex gap-1.5 ml-1.5 pl-1.5 border-l border-gray-200">
+                              <div className="flex items-center gap-0.5">
+                                <ArrowUpRight size={10} className="text-blue-500" />
+                                <span className="text-[9px] font-bold text-gray-400">출근 {spot.commute_morning_1}</span>
+                              </div>
+                              <div className="flex items-center gap-0.5">
+                                <ArrowDownLeft size={10} className="text-pink-500" />
+                                <span className="text-[9px] font-bold text-gray-400">퇴근 {spot.commute_evening_1}</span>
+                              </div>
+                            </div>
+                          </div>
+                          {mode === 'couple' && spot.commute_time_2 > 0 && (
+                            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all ${getTimeStatus(spot.commute_time_2).bg} ${getTimeStatus(spot.commute_time_2).border}`}>
+                              {inputs.user2.transport === 'car' ? <Car size={10} className={getTimeStatus(spot.commute_time_2).color} /> : <Bus size={10} className={getTimeStatus(spot.commute_time_2).color} />}
+                              <span className={`text-[11px] font-black ${getTimeStatus(spot.commute_time_2).color}`}>짝: {spot.commute_time_2}분</span>
+                              <div className="flex gap-1.5 ml-1.5 pl-1.5 border-l border-gray-200">
+                                <div className="flex items-center gap-0.5">
+                                  <ArrowUpRight size={10} className="text-blue-500" />
+                                  <span className="text-[9px] font-bold text-gray-400">출근 {spot.commute_morning_2}</span>
+                                </div>
+                                <div className="flex items-center gap-0.5">
+                                  <ArrowDownLeft size={10} className="text-pink-500" />
+                                  <span className="text-[9px] font-bold text-gray-400">퇴근 {spot.commute_evening_2}</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                          <div className="ml-auto flex items-center gap-1">
+                            <div className="text-[10px] font-black text-gray-400 mr-1">총 {spot.total_cost}만/월</div>
+                            <ChevronDown size={14} className={`text-gray-300 transition-transform ${expandedSpotIndex === i ? 'rotate-180' : ''}`} />
+                          </div>
+                        </div>
                       </div>
                     </button>
                     {expandedSpotIndex === i && (
@@ -736,8 +775,14 @@ function App() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="bg-blue-50 px-2.5 py-1 rounded-lg text-[11px] font-black text-blue-600 flex items-center gap-1"><Bus size={12} /> {spot.commute_time_1}분</div>
-                  <div className="bg-gray-50 px-2.5 py-1 rounded-lg text-[11px] font-black text-gray-500">실제 지출 월 {topApt?.fixed_monthly_exp}만</div>
+                  <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-black ${getTimeStatus(spot.commute_time_1).bg} ${getTimeStatus(spot.commute_time_1).color} border ${getTimeStatus(spot.commute_time_1).border}`}>
+                    <Bus size={12} /> {spot.commute_time_1}분 
+                    <span className="opacity-60 ml-1.5 pl-1.5 border-l border-gray-200 flex gap-1">
+                      <span className="flex items-center gap-0.5"><ArrowUpRight size={8} /> {spot.commute_morning_1}</span>
+                      <span className="flex items-center gap-0.5"><ArrowDownLeft size={8} /> {spot.commute_evening_1}</span>
+                    </span>
+                  </div>
+                  <div className="bg-gray-50 px-2.5 py-1 rounded-lg text-[10px] font-black text-gray-500">지출 {topApt?.fixed_monthly_exp}만</div>
                   <div className="ml-auto flex items-center gap-1 text-blue-500 font-black text-[11px]">상세보기 <ChevronRight size={14} /></div>
                 </div>
               </div>

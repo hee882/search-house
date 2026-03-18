@@ -6,3 +6,74 @@ INFO:     Started server process [13212]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+2026-03-16 10:25:24,714 [INFO] Loaded 620 stations
+2026-03-16 10:25:24,714 [INFO] Loaded 48 dong coordinates
+2026-03-16 10:25:24,763 [INFO] Loaded 620 stations
+2026-03-16 10:25:24,763 [INFO] Loaded 48 dong coordinates
+2026-03-16 10:47:34,826 [INFO] Loaded 620 stations
+2026-03-16 10:47:34,826 [INFO] Loaded 48 dong coordinates
+2026-03-16 10:47:34,882 [INFO] Loaded 620 stations
+2026-03-16 10:47:34,883 [INFO] Loaded 48 dong coordinates
+2026-03-16 11:17:59,322 [INFO] Loaded 620 stations
+2026-03-16 11:17:59,323 [INFO] Loaded 48 dong coordinates
+2026-03-16 11:17:59,381 [INFO] Loaded 620 stations
+2026-03-16 11:17:59,381 [INFO] Loaded 48 dong coordinates
+2026-03-16 11:28:50,369 [INFO] Loaded 620 stations
+2026-03-16 11:28:50,370 [INFO] Loaded 48 dong coordinates
+2026-03-16 11:28:50,421 [INFO] Loaded 620 stations
+2026-03-16 11:28:50,421 [INFO] Loaded 48 dong coordinates
+2026-03-16 11:32:28,434 [INFO] Loaded 620 stations
+2026-03-16 11:32:28,435 [INFO] Loaded 48 dong coordinates
+2026-03-16 11:32:28,484 [INFO] Loaded 620 stations
+2026-03-16 11:32:28,484 [INFO] Loaded 48 dong coordinates
+2026-03-16 11:40:29,030 [INFO] Loaded 620 stations
+2026-03-16 11:40:29,031 [INFO] Loaded 48 dong coordinates
+2026-03-16 11:40:29,082 [INFO] Loaded 620 stations
+2026-03-16 11:40:29,082 [INFO] Loaded 48 dong coordinates
+2026-03-16 12:51:19,370 [INFO] Loaded 620 stations
+2026-03-16 12:51:19,371 [INFO] Loaded 48 dong coordinates
+2026-03-16 12:51:19,428 [INFO] Loaded 620 stations
+2026-03-16 12:51:19,429 [INFO] Loaded 48 dong coordinates
+2026-03-16 12:52:20,661 [INFO] Loaded 620 stations
+2026-03-16 12:52:20,663 [INFO] Loaded 48 dong coordinates
+2026-03-16 12:52:20,708 [INFO] Loaded 620 stations
+2026-03-16 12:52:20,708 [INFO] Loaded 48 dong coordinates
+2026-03-16 12:55:27,362 [ERROR] Global Scan error: name 'base_transport_cost' is not defined
+2026-03-16 13:23:15,773 [INFO] Loaded 620 stations
+2026-03-16 13:23:15,773 [INFO] Loaded 48 dong coordinates
+2026-03-16 13:23:15,831 [INFO] Loaded 620 stations
+2026-03-16 13:23:15,831 [INFO] Loaded 48 dong coordinates
+2026-03-16 14:55:03,687 [INFO] Loaded 620 stations
+2026-03-16 14:55:03,687 [INFO] Loaded 48 dong coordinates
+2026-03-16 14:55:03,743 [INFO] Loaded 620 stations
+2026-03-16 14:55:03,743 [INFO] Loaded 48 dong coordinates
+2026-03-16 15:19:48,437 [INFO] Loaded 620 stations
+2026-03-16 15:19:48,437 [INFO] Loaded 48 dong coordinates
+2026-03-16 15:19:48,492 [INFO] Loaded 620 stations
+2026-03-16 15:19:48,492 [INFO] Loaded 48 dong coordinates
+2026-03-18 13:00:21,930 [INFO] Loaded 620 stations
+2026-03-18 13:00:21,930 [INFO] Loaded 48 dong coordinates
+2026-03-18 13:00:22,001 [INFO] Loaded 620 stations
+2026-03-18 13:00:22,002 [INFO] Loaded 48 dong coordinates
+2026-03-18 13:00:35,348 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,349 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,351 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,352 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,354 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,355 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,358 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,358 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,359 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,360 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,364 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,365 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,366 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,367 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,367 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,368 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,372 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,373 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,375 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:35,376 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:43,599 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env
+2026-03-18 13:00:43,600 [WARNING] [Kakao API] KAKAO_REST_API_KEY is missing in .env

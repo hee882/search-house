@@ -1,7 +1,8 @@
 // Naver Maps Provider
 // SDK: https://oapi.map.naver.com/openapi/v3/maps.js
 
-const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAP_CLIENT_ID;
+// const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAP_CLIENT_ID;
+const NAVER_CLIENT_ID = '4pawb5zngj'; // 직접 주입 테스트용
 
 function loadScript() {
   return new Promise((resolve, reject) => {
@@ -11,7 +12,10 @@ function loadScript() {
     }
 
     const script = document.createElement('script');
-    script.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpClientId=${NAVER_CLIENT_ID}&submodules=geocoder`;
+    // Referrer 정책 명시 및 캐시 방지
+    script.referrerPolicy = 'no-referrer-when-downgrade';
+    const now = new Date().getTime();
+    script.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpClientId=${NAVER_CLIENT_ID}&submodules=geocoder&t=${now}`;
     script.onload = () => {
       if (window.naver?.maps) {
         resolve();
