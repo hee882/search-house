@@ -487,7 +487,7 @@ function App() {
       const loc1 = inputs.user1.workplace;
       const loc2 = mode === 'couple' ? inputs.user2.workplace : null;
       setWorkplaceLocs({ user1: loc1, user2: loc2 });
-      const areaMap = { all: [40, 200], '2': [40, 60], '3': [60, 85], '4': [85, 200] };
+      const areaMap = { all: [33, 200], '10': [33, 66], '20': [66, 99], '30': [99, 132], '40': [132, 200] };
       const [minArea, maxArea] = areaMap[roomType] || areaMap.all;
       const payload = {
         mode,
@@ -714,7 +714,7 @@ function App() {
               </div>
 
               <div className="flex gap-2">
-                <div className="flex-1 space-y-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">방 타입</div><div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">{[['all', '전체'], ['2', '2룸'], ['3', '3룸'], ['4', '4룸+']].map(([val, label]) => (<button key={val} onClick={() => setRoomType(val)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${roomType === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>{label}</button>))}</div></div>
+                <div className="flex-1 space-y-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">집 크기</div><div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">{[['all', '전체'], ['10', '10평대'], ['20', '20평대'], ['30', '30평대'], ['40', '40평+']].map(([val, label]) => (<button key={val} onClick={() => setRoomType(val)} className={`flex-1 py-1.5 rounded-lg text-[10px] font-black transition-all ${roomType === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>{label}</button>))}</div></div>
                 <div className="flex-1 space-y-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">준공</div><div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">{[[0, '전체'], [5, '5년'], [10, '10년'], [20, '20년']].map(([val, label]) => (<button key={val} onClick={() => setBuildingAge(val)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${buildingAge === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>{label}</button>))}</div></div>
               </div>
               <div className="pt-1 px-1"><p className="text-[9px] font-black text-gray-300">※ 네이버 API 08:00 도착 / 18:00 출발 실시간 교통 반영</p></div>
@@ -746,6 +746,7 @@ function App() {
                         <div className="text-right shrink-0 ml-2">
                           <div className={`text-[9px] font-black px-2 py-0.5 rounded-full ${status.bg} ${status.color} border ${status.border} mb-1 inline-block`}>소득의 {Math.round(actualRatio * 100)}% ({status.label})</div>
                           <div className="text-[12px] font-black text-gray-700 tracking-tight">{topApt?.display_price_value}</div>
+                          {topApt?.avg_area && <div className="text-[9px] font-bold text-gray-400 mt-0.5">{topApt.avg_area}㎡ (약 {Math.round(topApt.avg_area / 3.3058)}평)</div>}
                           {topApt?.loan_amount > 0 && (
                             <div className="text-[9px] font-bold text-blue-500 mt-0.5">대출 {topApt.loan_amount.toLocaleString()}만 · 이자 {topApt.loan_monthly}만/월</div>
                           )}

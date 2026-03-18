@@ -119,13 +119,14 @@ def estimate_commute_time(distance_km, transport_mode):
 def _filter_complexes_by_iqr(raw_rows, min_samples=3):
     """
     단지별 GROUP_CONCAT 거래 데이터에 IQR 아웃라이어 제거 적용.
-    반환: [(apt_name, dong_name, city_code, avg_deposit, avg_rent, area, build_year), ...]
+    price_pairs 포맷: "deposit:rent:area,..."
+    반환: [(apt_name, dong_name, city_code, avg_deposit, avg_rent, avg_area, build_year), ...]
     """
     result = []
     for row in raw_rows:
         apt_name, dong_name, city_code = row[0], row[1], row[2]
-        price_pairs_str = row[3]  # "5000:240,10000:200,25000:140,..."
-        area, build_year = row[4], row[5]
+        price_pairs_str = row[3]  # "5000:240:59,10000:200:59,25000:140:84,..."
+        build_year = row[4]
 
         if not price_pairs_str:
             continue
@@ -133,17 +134,18 @@ def _filter_complexes_by_iqr(raw_rows, min_samples=3):
         pairs = []
         for p in price_pairs_str.split(','):
             try:
-                d, r = p.split(':')
-                pairs.append((int(d), int(r)))
+                parts = p.split(':')
+                d, r, a = int(parts[0]), int(parts[1]), float(parts[2])
+                pairs.append((d, r, a))
             except Exception:
                 continue
 
         if len(pairs) < min_samples:
             continue
 
-        deposits = [d for d, _ in pairs]
+        deposits = [d for d, _, _ in pairs]
 
-        # IQR 계산 (보증금 기준)
+        # IQR 계산 (보증금 기준 — 같은 면적 버킷 내 이상치 제거)
         if len(deposits) >= 4:
             sd = sorted(deposits)
             n = len(sd)
@@ -151,19 +153,18 @@ def _filter_complexes_by_iqr(raw_rows, min_samples=3):
             q3 = sd[(3 * n) // 4]
             iqr = q3 - q1
             lower_bound = q1 - 1.5 * iqr
-
-            # 하한 아웃라이어 제거 (공공임대·갱신 이상치)
-            clean_pairs = [(d, r) for d, r in pairs if d >= lower_bound]
+            clean_pairs = [(d, r, a) for d, r, a in pairs if d >= lower_bound]
         else:
             clean_pairs = pairs
 
         if len(clean_pairs) < min_samples:
             continue
 
-        avg_d = int(sum(d for d, _ in clean_pairs) / len(clean_pairs))
-        avg_r = int(sum(r for _, r in clean_pairs) / len(clean_pairs))
+        avg_d = int(sum(d for d, _, _ in clean_pairs) / len(clean_pairs))
+        avg_r = int(sum(r for _, r, _ in clean_pairs) / len(clean_pairs))
+        avg_a = round(sum(a for _, _, a in clean_pairs) / len(clean_pairs), 1)
 
-        result.append((apt_name, dong_name, city_code, avg_d, avg_r, area, build_year))
+        result.append((apt_name, dong_name, city_code, avg_d, avg_r, avg_a, build_year))
 
     return result
 
@@ -462,8 +463,8 @@ async def optimize_location(request: OptimizeRequest):
 
         raw_query = f"""
             SELECT apt_name, dong_name, city_code,
-                   GROUP_CONCAT(deposit || ':' || monthly_rent) as price_pairs,
-                   exclusive_area, build_year
+                   GROUP_CONCAT(deposit || ':' || monthly_rent || ':' || exclusive_area) as price_pairs,
+                   build_year
             FROM rent_transactions
             WHERE deal_year >= 2024
             {RENTAL_FILTER}
@@ -495,7 +496,7 @@ async def optimize_location(request: OptimizeRequest):
         candidates = []
         for row in all_complexes:
             apt_name, dong_name, city_code = row[0], row[1], row[2]
-            avg_deposit, avg_rent = int(row[3]), int(row[4])
+            avg_deposit, avg_rent, avg_area = int(row[3]), int(row[4]), row[5]
             
             # 월 주거비용 계산 (보유 자금 있으면 전세대출 이자 모델 적용)
             monthly_housing_cost = calculate_monthly_housing_cost(avg_deposit, avg_rent, request.available_cash)
@@ -528,7 +529,8 @@ async def optimize_location(request: OptimizeRequest):
             candidates.append({
                 "name": apt_name, "dong": dong_name, "city_code": city_code,
                 "lat": lat, "lng": lng, "monthly_housing_cost": monthly_housing_cost,
-                "dist_from_mid": dist_from_mid, "avg_deposit": avg_deposit, "avg_rent": avg_rent
+                "dist_from_mid": dist_from_mid, "avg_deposit": avg_deposit, "avg_rent": avg_rent,
+                "avg_area": avg_area
             })
 
         # 직장 중심점에서 가까운 순으로 50개 후보군 정밀 분석 (후보군 확대)
@@ -593,6 +595,7 @@ async def optimize_location(request: OptimizeRequest):
                     "fixed_monthly_exp": fixed_monthly_exp,
                     "hidden_life_cost": total_hidden_life_cost,
                     "total_opp_cost": total_opp_cost,
+                    "avg_area": spot['avg_area'],
                     "loan_amount": max(0, spot['avg_deposit'] - request.available_cash) if request.available_cash > 0 else 0,
                     "loan_monthly": round(max(0, spot['avg_deposit'] - request.available_cash) * JEONSE_LOAN_RATE / 12) if request.available_cash > 0 else 0,
                 }],
