@@ -339,6 +339,7 @@ function App() {
   const [mode, setMode] = useState('single');
   const [residentType] = useState('buy');
   const [housingRatio, setHousingRatio] = useState(0.25);
+  const [availableCash, setAvailableCash] = useState(0); // 보유 자금 (만원), 0=미입력
   const [roomType, setRoomType] = useState('all');
   const [buildingAge, setBuildingAge] = useState(0);
   const [preference, setPreference] = useState('balance'); // 'money', 'balance', 'time'
@@ -488,11 +489,12 @@ function App() {
       setWorkplaceLocs({ user1: loc1, user2: loc2 });
       const areaMap = { all: [40, 200], '2': [40, 60], '3': [60, 85], '4': [85, 200] };
       const [minArea, maxArea] = areaMap[roomType] || areaMap.all;
-      const payload = { 
-        mode, 
-        resident_type: residentType, 
-        housing_ratio: housingRatio, 
-        min_area: minArea, 
+      const payload = {
+        mode,
+        resident_type: residentType,
+        housing_ratio: housingRatio,
+        available_cash: availableCash,
+        min_area: minArea,
         max_area: maxArea, 
         max_building_age: buildingAge, 
         preference: preference,
@@ -670,6 +672,28 @@ function App() {
               </div>
 
               <div className="space-y-1.5">
+                <div className="flex items-center justify-between px-1">
+                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">보유 자금 (보증금으로 쓸 수 있는 현금)</div>
+                  {availableCash > 0 && <div className="text-[10px] font-black text-blue-600">{availableCash.toLocaleString()}만원</div>}
+                </div>
+                <div className="relative group">
+                  <Home className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-300" />
+                  <input
+                    type="number"
+                    value={availableCash || ''}
+                    onChange={(e) => setAvailableCash(parseInt(e.target.value) || 0)}
+                    placeholder="예: 5000  (미입력 시 기회비용 모델)"
+                    className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border-none rounded-xl text-[13px] font-black outline-none focus:ring-2 focus:ring-blue-500/20 placeholder:text-gray-300 placeholder:font-medium"
+                  />
+                </div>
+                {availableCash > 0 && (
+                  <div className="text-[10px] font-medium text-blue-500 pl-1 leading-snug">
+                    보증금 초과분은 전세대출 금리 3.5% 이자로 계산됩니다
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
                 <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">라이프스타일 성향</div>
                 <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
                   {[
@@ -719,7 +743,13 @@ function App() {
                           <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${i === 0 ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-400'}`}>{i === 0 ? <Trophy size={16} /> : i + 1}</div>
                           <div><div className="text-[9px] font-black text-blue-500 uppercase tracking-tighter mb-0.5">{spot.nearest_stations?.length > 0 ? spot.nearest_stations.join(' / ') + ' 인근' : (spot.dong || spot.name) + ' 인근'}</div><h6 className="text-[14px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[180px]">{topApt?.name}</h6></div>
                         </div>
-                        <div className="text-right shrink-0 ml-2"><div className={`text-[9px] font-black px-2 py-0.5 rounded-full ${status.bg} ${status.color} border ${status.border} mb-1 inline-block`}>소득의 {Math.round(actualRatio * 100)}% ({status.label})</div><div className="text-[12px] font-black text-gray-700 tracking-tight">{topApt?.display_price_value}</div></div>
+                        <div className="text-right shrink-0 ml-2">
+                          <div className={`text-[9px] font-black px-2 py-0.5 rounded-full ${status.bg} ${status.color} border ${status.border} mb-1 inline-block`}>소득의 {Math.round(actualRatio * 100)}% ({status.label})</div>
+                          <div className="text-[12px] font-black text-gray-700 tracking-tight">{topApt?.display_price_value}</div>
+                          {topApt?.loan_amount > 0 && (
+                            <div className="text-[9px] font-bold text-blue-500 mt-0.5">대출 {topApt.loan_amount.toLocaleString()}만 · 이자 {topApt.loan_monthly}만/월</div>
+                          )}
+                        </div>
                       </div>
                       <div className="flex gap-2">
                         <div className="flex-1 bg-gray-50 rounded-xl p-2.5 text-center border border-gray-100"><div className="text-[8px] font-black text-gray-400 uppercase mb-1">실제 지출</div><div className="text-[18px] font-black text-gray-900 tracking-tighter leading-none">{topApt?.fixed_monthly_exp}<span className="text-[11px] text-gray-400 ml-0.5">만</span></div><div className="text-[8px] font-bold text-gray-300 mt-0.5">주거비 + 교통비</div></div>

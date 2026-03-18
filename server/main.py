@@ -62,6 +62,7 @@ class OptimizeRequest(BaseModel):
     max_area: float = 200
     max_building_age: int = 0
     preference: str = 'balance' # money, balance, time
+    available_cash: int = 0    # 보유 자금 (만원), 0이면 기존 기회비용 모델 사용
 
 # --- Paths ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -124,6 +125,20 @@ def get_nearest_stations(lat, lng, n=3, max_distance_km=2.0):
             with_dist.append((d, s['name']))
     with_dist.sort(key=lambda x: x[0])
     return [name for _, name in with_dist[:n]]
+
+JEONSE_LOAN_RATE = 0.035  # 전세대출 금리 연 3.5% 기준
+
+def calculate_monthly_housing_cost(deposit, monthly_rent, available_cash=0):
+    """보유 자금을 고려한 월 주거비 계산.
+    available_cash > 0: 보유 자금 초과분은 전세대출(3.5%), 보유분은 기회비용(4%)
+    available_cash == 0: 기존 방식 (전체 보증금에 4% 기회비용)
+    """
+    if available_cash > 0:
+        own_cash = min(deposit, available_cash)
+        loan_amount = max(0, deposit - available_cash)
+        return monthly_rent + round(own_cash * 0.04 / 12) + round(loan_amount * JEONSE_LOAN_RATE / 12)
+    else:
+        return monthly_rent + round(deposit * 0.04 / 12)
 
 def calculate_hidden_life_cost(salary, commute_minutes):
     hourly_wage = (salary * 10000) / 12 / 209
@@ -374,19 +389,27 @@ async def optimize_location(request: OptimizeRequest):
         cursor = conn.cursor()
         
         # 주거비 필터링 및 임대단지 제외가 포함된 전역 쿼리
+        # 보증금 3000만원 미만 = 공공임대·갱신 특수계약으로 간주 제외
         query = '''
-            SELECT apt_name, dong_name, city_code, 
+            SELECT apt_name, dong_name, city_code,
                    AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent,
                    exclusive_area, build_year
             FROM rent_transactions
             WHERE deal_year >= 2024
-            AND deposit >= 100 -- 100만원 미만 보증금(비정상/임대) 제외
+            AND deposit >= 3000
             AND apt_name NOT LIKE '%임대%'
             AND apt_name NOT LIKE '%행복주택%'
             AND apt_name NOT LIKE '%LH%'
             AND apt_name NOT LIKE '%SH%'
             AND apt_name NOT LIKE '%공공임대%'
+            AND apt_name NOT LIKE '%국민임대%'
+            AND apt_name NOT LIKE '%영구임대%'
+            AND apt_name NOT LIKE '%장기전세%'
+            AND apt_name NOT LIKE '%시프트%'
+            AND apt_name NOT LIKE '%뉴스테이%'
+            AND apt_name NOT LIKE '%기업형임대%'
             AND apt_name NOT LIKE '%도시형%'
+            AND apt_name NOT LIKE '%오피스텔%'
             AND exclusive_area >= ? AND exclusive_area <= ?
         '''
         params = [request.min_area, request.max_area]
@@ -402,14 +425,22 @@ async def optimize_location(request: OptimizeRequest):
         # 만약 결과가 없다면, 기준을 조금 완화 (거래량 3건으로 하향)
         if not all_complexes:
             query_fallback = '''
-                SELECT apt_name, dong_name, city_code, 
+                SELECT apt_name, dong_name, city_code,
                        AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent,
                        exclusive_area, build_year
                 FROM rent_transactions
                 WHERE deal_year >= 2024
-                AND deposit >= 100
+                AND deposit >= 3000
                 AND apt_name NOT LIKE '%임대%'
                 AND apt_name NOT LIKE '%행복주택%'
+                AND apt_name NOT LIKE '%LH%'
+                AND apt_name NOT LIKE '%SH%'
+                AND apt_name NOT LIKE '%국민임대%'
+                AND apt_name NOT LIKE '%영구임대%'
+                AND apt_name NOT LIKE '%장기전세%'
+                AND apt_name NOT LIKE '%시프트%'
+                AND apt_name NOT LIKE '%뉴스테이%'
+                AND apt_name NOT LIKE '%오피스텔%'
                 AND exclusive_area >= ? AND exclusive_area <= ?
                 GROUP BY apt_name, dong_name, city_code HAVING COUNT(*) >= 3
             '''
@@ -428,8 +459,8 @@ async def optimize_location(request: OptimizeRequest):
             apt_name, dong_name, city_code = row[0], row[1], row[2]
             avg_deposit, avg_rent = int(row[3]), int(row[4])
             
-            # 월 주거비용 계산 및 예산 필터링
-            monthly_housing_cost = round((avg_deposit * 0.04) / 12) + avg_rent
+            # 월 주거비용 계산 (보유 자금 있으면 전세대출 이자 모델 적용)
+            monthly_housing_cost = calculate_monthly_housing_cost(avg_deposit, avg_rent, request.available_cash)
             if max_housing_budget > 0 and monthly_housing_cost > max_housing_budget:
                 continue
 
@@ -523,7 +554,9 @@ async def optimize_location(request: OptimizeRequest):
                     "display_price_value": f"{spot['avg_deposit']}만 / {spot['avg_rent']}만" if spot['avg_rent'] > 0 else f"{spot['avg_deposit']}만",
                     "fixed_monthly_exp": fixed_monthly_exp,
                     "hidden_life_cost": total_hidden_life_cost,
-                    "total_opp_cost": total_opp_cost
+                    "total_opp_cost": total_opp_cost,
+                    "loan_amount": max(0, spot['avg_deposit'] - request.available_cash) if request.available_cash > 0 else 0,
+                    "loan_monthly": round(max(0, spot['avg_deposit'] - request.available_cash) * JEONSE_LOAN_RATE / 12) if request.available_cash > 0 else 0,
                 }],
                 "score": weighted_score
             })
