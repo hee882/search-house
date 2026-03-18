@@ -10,7 +10,7 @@ import os
 import logging
 import sqlite3
 from datetime import datetime, timedelta
-from lib.kakao_api import get_kakao_commute
+from lib.kakao_api import get_kakao_commute, get_precise_coordinates
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -114,6 +114,16 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 def estimate_commute_time(distance_km, transport_mode):
     speed = 30 if transport_mode == 'car' else 20
     return int((distance_km / speed) * 60) + (5 if transport_mode == 'car' else 10)
+
+def get_nearest_stations(lat, lng, n=3, max_distance_km=2.0):
+    """좌표 기준 가장 가까운 지하철역 top n 반환 (2km 이내)"""
+    with_dist = []
+    for s in STATIONS_DATA:
+        d = calculate_distance(lat, lng, s['lat'], s['lng'])
+        if d <= max_distance_km:
+            with_dist.append((d, s['name']))
+    with_dist.sort(key=lambda x: x[0])
+    return [name for _, name in with_dist[:n]]
 
 def calculate_hidden_life_cost(salary, commute_minutes):
     hourly_wage = (salary * 10000) / 12 / 209
@@ -460,6 +470,11 @@ async def optimize_location(request: OptimizeRequest):
         base_transport_cost = 10 # 기본 교통비
 
         for spot in top_candidates:
+            # [고도화] 단지별 정밀 좌표 획득 시도 (동 좌표 -> 실제 단지 위치)
+            precise_lat, precise_lng = get_precise_coordinates(DB_PATH, spot['name'], spot['dong'], spot['city_code'])
+            if precise_lat and precise_lng:
+                spot['lat'], spot['lng'] = precise_lat, precise_lng
+                
             # 카카오 정밀 경로 분석 (출근/퇴근 각각)
             # 출근: 08:00 도착 시뮬레이션
             morning_time1, _ = get_kakao_commute(DB_PATH, spot['lat'], spot['lng'], request.user1.workplace.lat, request.user1.workplace.lng, request.user1.transport, goal_arrive_time="0800")
@@ -490,8 +505,11 @@ async def optimize_location(request: OptimizeRequest):
             weighted_score = int(fixed_monthly_exp * w_fixed + total_hidden_life_cost * w_hidden)
             total_opp_cost = fixed_monthly_exp + total_hidden_life_cost
 
+            nearest_stations = get_nearest_stations(spot['lat'], spot['lng'])
             results.append({
                 "name": spot['name'], "lat": spot['lat'], "lng": spot['lng'],
+                "nearest_stations": nearest_stations,
+                "dong": spot['dong'],
                 "total_cost": total_opp_cost,
                 "commute_time_1": avg_time1,
                 "commute_morning_1": morning_time1,
