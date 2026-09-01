@@ -1,9 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 import math
 import json
 import os
@@ -93,13 +92,6 @@ def load_global_data():
 # Initial load
 load_global_data()
 
-# --- Database & Helper Functions ---
-async def startup_event():
-    """서버 시작 시 stations 데이터 보장"""
-    if not STATIONS_DATA:
-        load_stations()
-    logger.info(f"Server ready: {len(STATIONS_DATA)} stations loaded")
-
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "stations": len(STATIONS_DATA)}
@@ -139,6 +131,12 @@ def _filter_complexes_by_iqr(raw_rows, min_samples=3):
                 pairs.append((d, r, a))
             except Exception:
                 continue
+
+        # 전세(월세 0)와 월세를 섞어 평균 내면 보증금·월세가 모두 왜곡되므로
+        # 거래가 더 많은 유형만 대표 시세로 사용
+        jeonse = [p for p in pairs if p[1] == 0]
+        wolse = [p for p in pairs if p[1] > 0]
+        pairs = jeonse if len(jeonse) >= len(wolse) else wolse
 
         if len(pairs) < min_samples:
             continue
@@ -200,100 +198,6 @@ def calculate_hidden_life_cost(salary, commute_minutes):
     elif commute_minutes >= 45: multiplier = 1.15
     return round((base_time_value * multiplier) / 10000)
 
-def get_complexes_with_costs(city_code, station_lat, station_lng, salary1, time1, salary2=0, time2=0,
-                             resident_type='rent', max_housing_budget=0,
-                             min_area=40, max_area=200, min_build_year=0):
-    if not os.path.exists(DB_PATH): return []
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-
-        # 후보 단지를 넉넉히 가져와서 예산 및 거리 필터링
-        query = '''
-            SELECT apt_name, dong_name, AVG(deposit) as avg_deposit, AVG(monthly_rent) as avg_rent, COUNT(*) as cnt
-            FROM rent_transactions
-            WHERE city_code = ? AND deal_year >= 2024
-            AND exclusive_area >= ? AND exclusive_area <= ?
-        '''
-        params = [city_code, min_area, max_area]
-        if min_build_year > 0:
-            query += ' AND build_year >= ?'
-            params.append(min_build_year)
-
-        query += '''
-            GROUP BY apt_name, dong_name
-            HAVING cnt >= 5
-            ORDER BY cnt DESC LIMIT 50
-        '''
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
-
-        candidates = []
-        for row in rows:
-            apt_name, dong_name = row[0], row[1]
-            avg_deposit, avg_rent = int(row[2]), int(row[3])
-
-            # 거리 필터링: 역과 동 좌표 사이의 거리 계산
-            dong_key = f"{city_code}_{dong_name}"
-            walk_time = 0
-            if dong_key in DONG_COORDS:
-                coord = DONG_COORDS[dong_key]
-                dist_to_station = calculate_distance(station_lat, station_lng, coord['lat'], coord['lng'])
-                if dist_to_station > 2.5: continue # 2.5km 초과 단지는 너무 멂
-                walk_time = int(dist_to_station * 12) # 1km당 약 12분 도보 가정
-
-            # 보정된 통근 시간
-            adjusted_time1 = time1 + walk_time
-            adjusted_time2 = time2 + (walk_time if salary2 > 0 else 0)
-
-            # 월 주거비용 (보증금 이자 4% 가정 + 월세)
-            monthly_housing_cost = round((avg_deposit * 0.04) / 12) + avg_rent
-
-            # 예산 필터: 주거비가 예산 초과하면 건너뛰기
-            if max_housing_budget > 0 and monthly_housing_cost > max_housing_budget:
-                continue
-
-            rent_type = "전세" if avg_rent == 0 else "월세"
-            display_price_label = rent_type
-
-            # 억 단위 포맷팅
-            if avg_deposit >= 10000:
-                eok, man = avg_deposit // 10000, avg_deposit % 10000
-                dep_str = f"{eok}억" + (f" {man}만" if man > 0 else "")
-            else:
-                dep_str = f"{avg_deposit}만"
-
-            display_price_value = f"{dep_str} / {avg_rent}만" if rent_type == "월세" else dep_str
-
-            base_transport_cost = 10
-            hidden_cost1 = calculate_hidden_life_cost(salary1, adjusted_time1)
-            hidden_cost2 = calculate_hidden_life_cost(salary2, adjusted_time2) if salary2 > 0 else 0
-            fixed_monthly_exp = monthly_housing_cost + base_transport_cost
-            total_hidden_life_cost = hidden_cost1 + hidden_cost2
-            total_opp_cost = fixed_monthly_exp + total_hidden_life_cost
-
-            candidates.append({
-                "name": apt_name, "dong": dong_name,
-                "rent_type": rent_type,
-                "deposit": avg_deposit,
-                "monthly_rent": avg_rent,
-                "display_price_label": display_price_label,
-                "display_price_value": display_price_value,
-                "fixed_monthly_exp": fixed_monthly_exp,
-                "hidden_life_cost": total_hidden_life_cost,
-                "total_opp_cost": total_opp_cost,
-                "housing_cost_only": monthly_housing_cost,
-                "commute_time_total": adjusted_time1 # 대표 시간으로 사용
-            })
-
-        # 예산 내에서 주거비 높은 순 정렬 (예산 꽉 채운 = 더 좋은 단지)
-        candidates.sort(key=lambda x: x['housing_cost_only'], reverse=True)
-        return candidates[:3]
-    except Exception as e:
-        logger.error(f"Complex calculation error: {e}")
-        return []
-
 @app.get("/api/stats/transactions")
 async def get_transaction_stats(city_code: str, year: int = None, month: int = None):
     if not os.path.exists(DB_PATH):
@@ -304,49 +208,50 @@ async def get_transaction_stats(city_code: str, year: int = None, month: int = N
         month = month or now.month
 
         conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        cursor.execute('''
-            SELECT COUNT(*) FROM transactions
-            WHERE city_code = ? AND deal_year = ? AND deal_month = ?
-            AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
-        ''', (city_code, year, month))
-        total = cursor.fetchone()[0]
+            cursor.execute('''
+                SELECT COUNT(*) FROM transactions
+                WHERE city_code = ? AND deal_year = ? AND deal_month = ?
+                AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
+            ''', (city_code, year, month))
+            total = cursor.fetchone()[0]
 
-        cursor.execute('''
-            SELECT COUNT(*) FROM transactions
-            WHERE city_code = ? AND deal_year = ? AND deal_month = ?
-            AND is_new_high_price = 1
-        ''', (city_code, year, month))
-        new_high_count = cursor.fetchone()[0]
+            cursor.execute('''
+                SELECT COUNT(*) FROM transactions
+                WHERE city_code = ? AND deal_year = ? AND deal_month = ?
+                AND is_new_high_price = 1
+            ''', (city_code, year, month))
+            new_high_count = cursor.fetchone()[0]
 
-        cursor.execute('''
-            SELECT COUNT(*) FROM transactions
-            WHERE city_code = ? AND deal_year = ? AND deal_month = ?
-            AND cancel_deal_day IS NOT NULL AND cancel_deal_day != ''
-        ''', (city_code, year, month))
-        cancel_count = cursor.fetchone()[0]
+            cursor.execute('''
+                SELECT COUNT(*) FROM transactions
+                WHERE city_code = ? AND deal_year = ? AND deal_month = ?
+                AND cancel_deal_day IS NOT NULL AND cancel_deal_day != ''
+            ''', (city_code, year, month))
+            cancel_count = cursor.fetchone()[0]
 
-        cursor.execute('''
-            SELECT deal_day, COUNT(*) as cnt,
-                   SUM(CASE WHEN is_new_high_price = 1 THEN 1 ELSE 0 END) as new_high
-            FROM transactions
-            WHERE city_code = ? AND deal_year = ? AND deal_month = ?
-            AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
-            GROUP BY deal_day ORDER BY deal_day
-        ''', (city_code, year, month))
-        daily = [{"day": r[0], "count": r[1], "new_high": r[2]} for r in cursor.fetchall()]
+            cursor.execute('''
+                SELECT deal_day, COUNT(*) as cnt,
+                       SUM(CASE WHEN is_new_high_price = 1 THEN 1 ELSE 0 END) as new_high
+                FROM transactions
+                WHERE city_code = ? AND deal_year = ? AND deal_month = ?
+                AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
+                GROUP BY deal_day ORDER BY deal_day
+            ''', (city_code, year, month))
+            daily = [{"day": r[0], "count": r[1], "new_high": r[2]} for r in cursor.fetchall()]
 
-        cursor.execute('''
-            SELECT buyer_type, COUNT(*) FROM transactions
-            WHERE city_code = ? AND deal_year = ? AND deal_month = ?
-            AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
-            AND buyer_type IS NOT NULL AND buyer_type != ''
-            GROUP BY buyer_type
-        ''', (city_code, year, month))
-        buyer_types = {r[0]: r[1] for r in cursor.fetchall()}
-
-        conn.close()
+            cursor.execute('''
+                SELECT buyer_type, COUNT(*) FROM transactions
+                WHERE city_code = ? AND deal_year = ? AND deal_month = ?
+                AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
+                AND buyer_type IS NOT NULL AND buyer_type != ''
+                GROUP BY buyer_type
+            ''', (city_code, year, month))
+            buyer_types = {r[0]: r[1] for r in cursor.fetchall()}
+        finally:
+            conn.close()
 
         return {
             "city_code": city_code,
@@ -370,23 +275,25 @@ async def get_new_highs(city_code: str, limit: int = 20):
         raise HTTPException(status_code=404, detail="DB not found")
     try:
         conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT t.apt_name, t.dong_name, t.exclusive_area, t.deal_amount,
-                   t.deal_year, t.deal_month, t.deal_day, t.floor, t.build_year,
-                   (SELECT MAX(t2.deal_amount) FROM transactions t2
-                    WHERE t2.apt_name = t.apt_name AND t2.dong_name = t.dong_name
-                    AND t2.exclusive_area = t.exclusive_area
-                    AND (t2.cancel_deal_day IS NULL OR t2.cancel_deal_day = '')
-                    AND t2.id < t.id) as prev_high
-            FROM transactions t
-            WHERE t.city_code = ? AND t.is_new_high_price = 1
-            AND (t.cancel_deal_day IS NULL OR t.cancel_deal_day = '')
-            ORDER BY t.deal_year DESC, t.deal_month DESC, t.deal_day DESC
-            LIMIT ?
-        ''', (city_code, limit))
-        rows = cursor.fetchall()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT t.apt_name, t.dong_name, t.exclusive_area, t.deal_amount,
+                       t.deal_year, t.deal_month, t.deal_day, t.floor, t.build_year,
+                       (SELECT MAX(t2.deal_amount) FROM transactions t2
+                        WHERE t2.apt_name = t.apt_name AND t2.dong_name = t.dong_name
+                        AND t2.exclusive_area = t.exclusive_area
+                        AND (t2.cancel_deal_day IS NULL OR t2.cancel_deal_day = '')
+                        AND t2.id < t.id) as prev_high
+                FROM transactions t
+                WHERE t.city_code = ? AND t.is_new_high_price = 1
+                AND (t.cancel_deal_day IS NULL OR t.cancel_deal_day = '')
+                ORDER BY t.deal_year DESC, t.deal_month DESC, t.deal_day DESC
+                LIMIT ?
+            ''', (city_code, limit))
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
 
         items = []
         for r in rows:
@@ -410,7 +317,7 @@ async def get_new_highs(city_code: str, limit: int = 20):
 async def get_stations():
     if not STATIONS_DATA:
         # Retry loading once if memory is empty
-        load_stations()
+        load_global_data()
     return STATIONS_DATA
 
 @app.post("/api/optimize")
@@ -461,25 +368,30 @@ async def optimize_location(request: OptimizeRequest):
         area_filter = "AND exclusive_area >= ? AND exclusive_area <= ?"
         year_filter = " AND build_year >= ?" if min_build_year > 0 else ""
 
+        # 최근 12개월 거래만 집계 (연/월을 개월 수로 환산해 비교)
+        min_month_index = (now.year * 12 + now.month) - 12
+
         raw_query = f"""
             SELECT apt_name, dong_name, city_code,
                    GROUP_CONCAT(deposit || ':' || monthly_rent || ':' || exclusive_area) as price_pairs,
                    build_year
             FROM rent_transactions
-            WHERE deal_year >= 2024
+            WHERE (deal_year * 12 + deal_month) >= ?
             {RENTAL_FILTER}
             {area_filter}
             {year_filter}
             GROUP BY apt_name, dong_name, city_code
             HAVING COUNT(*) >= 3
         """
-        params = [request.min_area, request.max_area]
+        params = [min_month_index, request.min_area, request.max_area]
         if min_build_year > 0:
             params.append(min_build_year)
 
-        cursor.execute(raw_query, params)
-        raw_rows = cursor.fetchall()
-        conn.close()
+        try:
+            cursor.execute(raw_query, params)
+            raw_rows = cursor.fetchall()
+        finally:
+            conn.close()
 
         # IQR 기반 아웃라이어 제거 후 클린 평균 산출
         all_complexes = _filter_complexes_by_iqr(raw_rows, min_samples=3)
@@ -610,13 +522,9 @@ async def optimize_location(request: OptimizeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- Static Frontend Serving ---
+# mount("/")가 API 라우트 이후의 모든 경로를 처리하므로 별도 catchall 라우트는 불필요
 if os.path.exists(FRONTEND_DIST):
     app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="static")
-    @app.get("/{catchall:path}")
-    async def serve_react_app(catchall: str):
-        index_file = os.path.join(FRONTEND_DIST, "index.html")
-        if os.path.exists(index_file): return FileResponse(index_file)
-        return {"error": "Frontend not built."}
 
 if __name__ == "__main__":
     import uvicorn
