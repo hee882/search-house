@@ -7,14 +7,42 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import xmltodict
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "search_house.db")
 REGIONS_PATH = os.path.join(os.path.dirname(__file__), "data", "region_codes.json")
-API_KEY = "7c7b7f2b751248958a8bf6bba48481d621f202f946cf8028056a89b3c9feb532"  # 사용자 제공 키
+API_KEY = os.getenv("DATA_API_KEY")
 API_URL = "http://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
 
 def get_latest_month():
     return datetime.now().strftime("%Y%m")
+
+def ensure_table():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS rent_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            city_code TEXT,
+            dong_name TEXT,
+            apt_name TEXT,
+            exclusive_area REAL,
+            deal_year INTEGER,
+            deal_month INTEGER,
+            deal_day INTEGER,
+            deposit INTEGER,
+            monthly_rent INTEGER,
+            floor INTEGER,
+            build_year INTEGER,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(city_code, apt_name, dong_name, deal_year, deal_month, deal_day, deposit, monthly_rent, floor)
+        )
+    ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_rent_city ON rent_transactions(city_code, deal_year, deal_month)")
+    conn.commit()
+    conn.close()
 
 def parse_int(val):
     if not val:
@@ -112,6 +140,12 @@ def fetch_and_save_rent(city_code, deal_ymd):
 
 
 def run_collector(target_month=None):
+    if not API_KEY:
+        print("Error: DATA_API_KEY not found in environment.")
+        return
+
+    ensure_table()
+
     with open(REGIONS_PATH, "r", encoding="utf-8") as f:
         regions = json.load(f)
 
@@ -121,8 +155,6 @@ def run_collector(target_month=None):
     print(f"Starting Rent data collection for {target_month}...")
 
     total_new = 0
-    # Let's limit the collection for test to save API calls
-    # Or just run it.
     for province, cities in regions.items():
         print(f"Processing {province}...")
         for city_name, code in cities.items():
