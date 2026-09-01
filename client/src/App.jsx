@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, ShieldCheck, List, Settings2, Train, X, HelpCircle, DollarSign, Home, Calculator, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight, Coffee, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
-import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds, getZoom, setZoom, setCenter, geocodeAddress } from './lib/map';
+import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds, getZoom, setZoom, geocodeAddress } from './lib/map';
 
 // 지하철 호선별 공식 색상
 const LINE_COLORS = {
@@ -504,10 +504,12 @@ function App() {
 
       setLoadingMessage("수도권 3만 개 단지 실거래 데이터 필터링 중..."); await sleep(800);
       setLoadingMessage(`${inputs.user1.salary}만원 연봉 기반 최적 예산 구간 산출 완료`); await sleep(600);
-      setLoadingMessage("네이버 08:00 실시간 교통망 시뮬레이션 중...");
+      setLoadingMessage("08:00 출근 피크 실시간 교통망 시뮬레이션 중...");
       const fetchPromise = fetch(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       await sleep(1200); setLoadingMessage("기회비용 및 피로도 가중치 랭킹 산출 중...");
-      const response = await fetchPromise; const data = await response.json();
+      const response = await fetchPromise;
+      if (!response.ok) throw new Error(`분석 요청 실패 (HTTP ${response.status})`);
+      const data = await response.json();
 
       // 클라이언트 사이드 좌표 보정: 카카오 지도 JS SDK로 단지 정밀 위치 조회
       setLoadingMessage("단지 위치 정밀 보정 중...");
@@ -518,7 +520,7 @@ function App() {
           try {
             const coords = await geocodeAddress(query);
             if (coords) return { ...spot, lat: coords.lat, lng: coords.lng };
-          } catch (e) { /* 실패시 서버 좌표 유지 */ }
+          } catch { /* 실패시 서버 좌표 유지 */ }
           return spot;
         })
       );

@@ -1,8 +1,7 @@
 // Naver Maps Provider
 // SDK: https://oapi.map.naver.com/openapi/v3/maps.js
 
-// const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAP_CLIENT_ID;
-const NAVER_CLIENT_ID = '4pawb5zngj'; // 직접 주입 테스트용
+const NAVER_CLIENT_ID = import.meta.env.VITE_NAVER_MAP_CLIENT_ID;
 
 function loadScript() {
   return new Promise((resolve, reject) => {
