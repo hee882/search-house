@@ -185,6 +185,25 @@ class RoutingModeTests(TestCase):
             self.assertTrue(kakao_api.is_realtime_routing_available())
 
 
+class PriceAggregationTests(TestCase):
+    def test_dominant_area_bucket_is_used_instead_of_mixed_average(self):
+        rows = [("단지A", "역삼동", "11680", "10000:0:59,10500:0:59,11000:0:59,30000:0:130", 2000)]
+        (_, _, _, avg_deposit, _, avg_area, _), = main._filter_complexes_by_iqr(rows)
+        self.assertEqual(avg_deposit, 10500)
+        self.assertEqual(avg_area, 59.0)
+
+    def test_high_price_outlier_is_removed(self):
+        rows = [("단지B", "역삼동", "11680", "10000:0:59,10200:0:59,10400:0:59,10600:0:59,90000:0:59", 2000)]
+        (_, _, _, avg_deposit, _, _, _), = main._filter_complexes_by_iqr(rows)
+        self.assertEqual(avg_deposit, 10300)
+
+    def test_jeonse_and_wolse_are_not_averaged_together(self):
+        rows = [("단지C", "역삼동", "11680", "30000:0:59,31000:0:59,5000:80:59,5200:85:59,5400:90:59", 2000)]
+        (_, _, _, avg_deposit, avg_rent, _, _), = main._filter_complexes_by_iqr(rows)
+        self.assertLess(avg_deposit, 10000)
+        self.assertGreater(avg_rent, 0)
+
+
 class HousingCostModelTests(TestCase):
     def test_sale_uses_mortgage_rate_and_rent_uses_jeonse_rate(self):
         sale = main.calculate_monthly_housing_cost(60000, 0, available_cash=30000, resident_type="buy")

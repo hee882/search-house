@@ -193,12 +193,22 @@ def _filter_complexes_by_iqr(raw_rows, min_samples=3):
         wolse = [p for p in pairs if p[1] > 0]
         pairs = jeonse if len(jeonse) >= len(wolse) else wolse
 
+        # 같은 단지라도 전용 40㎡와 84㎡는 다른 매물이다. 면적대를 섞어 평균 내면
+        # 가격과 평균 면적이 모두 실제로는 존재하지 않는 값이 되므로,
+        # 전용 10㎡ 단위로 묶어 거래가 가장 많은 면적대만 대표 시세로 사용한다.
+        # (거래 수가 같으면 예산 관점에서 보수적인 작은 면적대를 택한다)
+        area_buckets = {}
+        for pair in pairs:
+            area_buckets.setdefault(int(pair[2] // 10), []).append(pair)
+        pairs = max(area_buckets.items(), key=lambda item: (len(item[1]), -item[0]))[1]
+
         if len(pairs) < min_samples:
             continue
 
         deposits = [d for d, _, _ in pairs]
 
-        # IQR 계산 (보증금 기준 — 같은 면적 버킷 내 이상치 제거)
+        # IQR 계산 (가격 기준). 상한도 함께 적용해야 대형 평형·고층 프리미엄 거래가
+        # 대표 시세를 끌어올리는 것을 막을 수 있다.
         if len(deposits) >= 4:
             sd = sorted(deposits)
             n = len(sd)
@@ -206,7 +216,8 @@ def _filter_complexes_by_iqr(raw_rows, min_samples=3):
             q3 = sd[(3 * n) // 4]
             iqr = q3 - q1
             lower_bound = q1 - 1.5 * iqr
-            clean_pairs = [(d, r, a) for d, r, a in pairs if d >= lower_bound]
+            upper_bound = q3 + 1.5 * iqr
+            clean_pairs = [(d, r, a) for d, r, a in pairs if lower_bound <= d <= upper_bound]
         else:
             clean_pairs = pairs
 
