@@ -392,6 +392,7 @@ function App() {
   const [stationLoading, setStationLoading] = useState(true);
   const [stationError, setStationError] = useState(null);
   const [searchError, setSearchError] = useState(null);
+  const [realtimeRouting, setRealtimeRouting] = useState(null); // 서버가 실제 경로 API를 쓰는지 여부
   const [showHelp, setShowHelp] = useState(false);
 
   const mapContainerRef = useRef(null);
@@ -548,6 +549,7 @@ function App() {
       if (!response.ok) throw new Error(`분석 요청 실패 (HTTP ${response.status})`);
       const data = await response.json();
       if (!data || !Array.isArray(data.results)) throw new Error('INVALID_RESPONSE');
+      setRealtimeRouting(typeof data.meta?.realtime_routing === 'boolean' ? data.meta.realtime_routing : null);
       const validResults = data.results.filter(spot => spot && Number.isFinite(Number(spot.lat)) && Number.isFinite(Number(spot.lng)) && Array.isArray(spot.complexes));
       if (validResults.length !== data.results.length) throw new Error('INVALID_RESPONSE');
 
@@ -780,7 +782,9 @@ function App() {
                 <div className="flex-1 space-y-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">집 크기</div><div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">{[['all', '전체'], ['10', '10평대'], ['20', '20평대'], ['30', '30평대'], ['40', '40평+']].map(([val, label]) => (<button key={val} onClick={() => setRoomType(val)} className={`flex-1 py-1.5 rounded-lg text-[10px] font-black transition-all ${roomType === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>{label}</button>))}</div></div>
                 <div className="flex-1 space-y-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">준공</div><div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">{[[0, '전체'], [5, '5년'], [10, '10년'], [20, '20년']].map(([val, label]) => (<button key={val} onClick={() => setBuildingAge(val)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${buildingAge === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>{label}</button>))}</div></div>
               </div>
-              <div className="pt-1 px-1"><p className="text-[9px] font-black text-gray-300">{usesCarRouting ? '※ 카카오 길찾기 API 08:00 도착 / 18:00 출발 실시간 교통 반영' : '※ 대중교통 소요시간은 거리·출근 시간대 기반 추정치입니다'}</p></div>
+              <div className="pt-1 px-1"><p className="text-[9px] font-black text-gray-300">{usesCarRouting && realtimeRouting !== false
+                  ? '※ 카카오 길찾기 API 08:00 도착 / 18:00 출발 실시간 교통 반영'
+                  : '※ 소요시간은 거리·출근 시간대 기반 추정치입니다 (08:00 도착 / 18:00 출발 기준)'}</p></div>
               {searchError && (
                 <div className="rounded-xl border border-red-100 bg-red-50 p-3" role="alert" aria-live="assertive">
                   <p className="text-[11px] font-bold text-red-700">{searchError}</p>

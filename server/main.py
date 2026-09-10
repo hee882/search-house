@@ -11,7 +11,7 @@ import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta
-from lib.kakao_api import get_kakao_commute, get_precise_coordinates
+from lib.kakao_api import get_kakao_commute, get_precise_coordinates, is_realtime_routing_available
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -579,7 +579,13 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
 
         # 최종 가성비 순으로 정렬
         results.sort(key=lambda x: x['score'])
-        return {"results": results[:5]}
+        return {
+            "results": results[:5],
+            "meta": {
+                # 카카오 REST 키가 없으면 소요시간·좌표가 모두 추정값이므로 클라이언트가 그대로 안내한다
+                "realtime_routing": is_realtime_routing_available(),
+            },
+        }
     except Exception:
         logger.exception("Optimize request failed")
         raise HTTPException(status_code=500, detail="Internal server error")

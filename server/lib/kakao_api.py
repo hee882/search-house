@@ -16,6 +16,15 @@ KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
 CACHE_TTL_SECONDS = int(os.getenv("COMMUTE_CACHE_TTL_SECONDS", "900"))
 
 
+def is_realtime_routing_available():
+    """카카오 모빌리티 실시간 경로 API를 실제로 호출할 수 있는 상태인지 반환.
+
+    REST 키가 없거나 JavaScript 키가 잘못 설정된 경우 모든 소요시간이
+    거리 기반 추정치로 계산되므로, 응답에서 이를 그대로 알려야 한다.
+    """
+    return bool(KAKAO_REST_API_KEY) and not KAKAO_REST_API_KEY.startswith('feb433')
+
+
 def _connect(db_path):
     """SQLite 커넥션 생성 (동시 접근 시 5초까지 대기)"""
     conn = sqlite3.connect(db_path)

@@ -171,6 +171,20 @@ class DistrictCenterTests(TestCase):
         self.assertIsNone(centers.get("99999"))
 
 
+class RoutingModeTests(TestCase):
+    def test_realtime_routing_requires_rest_key(self):
+        with mock.patch.object(kakao_api, "KAKAO_REST_API_KEY", None):
+            self.assertFalse(kakao_api.is_realtime_routing_available())
+
+    def test_javascript_key_is_not_treated_as_realtime_capable(self):
+        with mock.patch.object(kakao_api, "KAKAO_REST_API_KEY", "feb433e26a2ced15800280d98c464a14"):
+            self.assertFalse(kakao_api.is_realtime_routing_available())
+
+    def test_valid_rest_key_enables_realtime_routing(self):
+        with mock.patch.object(kakao_api, "KAKAO_REST_API_KEY", "0123456789abcdef0123456789abcdef"):
+            self.assertTrue(kakao_api.is_realtime_routing_available())
+
+
 class ApiValidationTests(TestCase):
     @classmethod
     def setUpClass(cls):
