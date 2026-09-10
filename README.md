@@ -72,6 +72,15 @@ COMMUTE_CACHE_TTL_SECONDS=900
 
 `/api/optimize`는 IP별 요청 제한을 적용하며 초과 시 `429`를 반환합니다. 대중교통 모드는 자동차 경로 API를 호출하지 않고 검증된 거리 기반 추정치를 사용합니다. 통근·단지 좌표 캐시는 만료 정책과 지역코드별 키를 사용합니다.
 
+### 법정동 좌표 사전
+```bash
+python server/build_dong_coords.py            # 좌표가 없는 동만 보강
+python server/build_dong_coords.py --force    # 기존 좌표까지 갱신
+```
+`server/data/dong_coordinates.json`은 후보 단지의 대략 위치를 잡는 데 쓰인다. 좌표가 없는 동은
+구 중심 좌표로 대체되므로 통근 시간·최근접역 정확도가 떨어진다. `KAKAO_REST_API_KEY`를 설정한 뒤
+위 스크립트를 실행하면 실거래 DB에 등장하는 동을 카카오 로컬 API로 채운다.
+
 ### 데이터 수집
 ```bash
 python server/collector.py                  # 현재월 수집

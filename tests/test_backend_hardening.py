@@ -156,6 +156,21 @@ class NewHighBackfillTests(TestCase):
         connection.close()
 
 
+class DistrictCenterTests(TestCase):
+    def test_district_center_is_average_of_known_dong_coordinates(self):
+        centers = main._build_district_centers({
+            "11680_역삼동": {"lat": 37.5, "lng": 127.0},
+            "11680_자곡동": {"lat": 37.4, "lng": 127.1},
+            "11110_사직동": {"lat": 37.6, "lng": 126.9},
+        })
+        self.assertEqual(centers["11680"], {"lat": 37.45, "lng": 127.05})
+        self.assertEqual(centers["11110"], {"lat": 37.6, "lng": 126.9})
+
+    def test_district_center_ignores_unknown_city_code(self):
+        centers = main._build_district_centers({"11680_역삼동": {"lat": 37.5, "lng": 127.0}})
+        self.assertIsNone(centers.get("99999"))
+
+
 class ApiValidationTests(TestCase):
     @classmethod
     def setUpClass(cls):

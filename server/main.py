@@ -107,9 +107,28 @@ FRONTEND_DIST = os.path.join(BASE_DIR, "client", "dist")
 # --- Global Data ---
 STATIONS_DATA = []
 DONG_COORDS = {}
+DISTRICT_CENTERS = {}  # city_code -> 구 내 동 좌표의 평균(대표 좌표)
+
+def _build_district_centers(dong_coords):
+    """구(city_code)별 동 좌표 평균을 대표 좌표로 계산.
+
+    동 좌표가 없는 단지의 대체 좌표로 사용한다. 예전에는 사전순 첫 동의 좌표를
+    그대로 썼기 때문에 같은 구 안에서도 한쪽 끝으로 크게 치우쳤다.
+    """
+    buckets = {}
+    for key, value in dong_coords.items():
+        code = key.split("_")[0]
+        buckets.setdefault(code, []).append((value["lat"], value["lng"]))
+    return {
+        code: {
+            "lat": round(sum(p[0] for p in points) / len(points), 6),
+            "lng": round(sum(p[1] for p in points) / len(points), 6),
+        }
+        for code, points in buckets.items()
+    }
 
 def load_global_data():
-    global STATIONS_DATA, DONG_COORDS
+    global STATIONS_DATA, DONG_COORDS, DISTRICT_CENTERS
     try:
         if os.path.exists(STATIONS_PATH):
             with open(STATIONS_PATH, "r", encoding="utf-8") as f:
@@ -120,6 +139,8 @@ def load_global_data():
             with open(DONG_COORDS_PATH, "r", encoding="utf-8") as f:
                 DONG_COORDS = json.load(f)
             logger.info(f"Loaded {len(DONG_COORDS)} dong coordinates")
+        DISTRICT_CENTERS = _build_district_centers(DONG_COORDS)
+        logger.info(f"Built {len(DISTRICT_CENTERS)} district centers")
     except Exception as e:
         logger.error(f"Failed to load global data: {e}")
 
@@ -467,14 +488,12 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
                 coord = DONG_COORDS[dong_key]
                 lat, lng = coord['lat'], coord['lng']
             else:
-                # [고도화] 특정 동 좌표가 없으면 구 단위(city_code) 대표 좌표라도 매칭 시도
-                # (지방이나 경기도 외곽 대응용)
-                city_key = f"{city_code}_"
-                # city_code로 시작하는 첫 번째 동의 좌표를 구 대표로 사용
-                for k, v in DONG_COORDS.items():
-                    if k.startswith(city_code):
-                        lat, lng = v['lat'], v['lng']
-                        break
+                # 동 좌표가 없으면 구(city_code) 중심 좌표로 대체한다.
+                # 사전순 첫 동을 쓰던 방식은 구 경계 쪽으로 크게 치우쳐
+                # 통근 시간과 최근접역이 실제와 어긋났다.
+                center = DISTRICT_CENTERS.get(city_code)
+                if center:
+                    lat, lng = center['lat'], center['lng']
             
             if not lat:
                 continue # 여전히 좌표 정보 없으면 제외
