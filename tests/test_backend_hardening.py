@@ -185,6 +185,24 @@ class RoutingModeTests(TestCase):
             self.assertTrue(kakao_api.is_realtime_routing_available())
 
 
+class HousingCostModelTests(TestCase):
+    def test_sale_uses_mortgage_rate_and_rent_uses_jeonse_rate(self):
+        sale = main.calculate_monthly_housing_cost(60000, 0, available_cash=30000, resident_type="buy")
+        rent = main.calculate_monthly_housing_cost(60000, 0, available_cash=30000, resident_type="rent")
+        self.assertGreater(sale, rent)
+        expected_sale = round(30000 * main.CASH_OPPORTUNITY_RATE / 12) + round(30000 * main.MORTGAGE_RATE / 12)
+        self.assertEqual(sale, expected_sale)
+
+    def test_without_cash_only_opportunity_cost_applies(self):
+        cost = main.calculate_monthly_housing_cost(50000, 30, available_cash=0, resident_type="buy")
+        self.assertEqual(cost, 30 + round(50000 * main.CASH_OPPORTUNITY_RATE / 12))
+
+    def test_price_format_uses_korean_units(self):
+        self.assertEqual(main.format_price_kr(9800), "9,800만")
+        self.assertEqual(main.format_price_kr(50000), "5억")
+        self.assertEqual(main.format_price_kr(53166), "5억 3,166만")
+
+
 class ApiValidationTests(TestCase):
     @classmethod
     def setUpClass(cls):

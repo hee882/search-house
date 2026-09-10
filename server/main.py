@@ -231,19 +231,33 @@ def get_nearest_stations(lat, lng, n=3, max_distance_km=2.0):
     with_dist.sort(key=lambda x: x[0])
     return [name for _, name in with_dist[:n]]
 
-JEONSE_LOAN_RATE = 0.035  # 전세대출 금리 연 3.5% 기준
+JEONSE_LOAN_RATE = 0.035    # 전세대출 금리 연 3.5% 기준
+MORTGAGE_RATE = 0.042       # 주택담보대출 금리 연 4.2% 기준
+CASH_OPPORTUNITY_RATE = 0.04  # 자기자본을 예치했을 때의 기회수익률 연 4%
 
-def calculate_monthly_housing_cost(deposit, monthly_rent, available_cash=0):
+
+def format_price_kr(amount_manwon):
+    """만원 단위 금액을 '5억 8,000만' 형태로 표기"""
+    amount = int(amount_manwon)
+    if amount >= 10000:
+        eok, remainder = divmod(amount, 10000)
+        return f"{eok}억" if remainder == 0 else f"{eok}억 {remainder:,}만"
+    return f"{amount:,}만"
+
+def calculate_monthly_housing_cost(deposit, monthly_rent, available_cash=0, resident_type='rent'):
     """보유 자금을 고려한 월 주거비 계산.
-    available_cash > 0: 보유 자금 초과분은 전세대출(3.5%), 보유분은 기회비용(4%)
-    available_cash == 0: 기존 방식 (전체 보증금에 4% 기회비용)
+
+    deposit은 전월세면 보증금, 매매면 매매가(만원)를 뜻한다.
+    available_cash > 0: 초과분은 대출 이자(전세 3.5% / 주담대 4.2%), 보유분은 기회비용(4%)
+    available_cash == 0: 전액을 묶인 자금으로 보고 기회비용(4%)만 계산
+    매매는 취득세·보유세·수선비를 포함하지 않는 자금비용 기준이다.
     """
+    loan_rate = MORTGAGE_RATE if resident_type == 'buy' else JEONSE_LOAN_RATE
     if available_cash > 0:
         own_cash = min(deposit, available_cash)
         loan_amount = max(0, deposit - available_cash)
-        return monthly_rent + round(own_cash * 0.04 / 12) + round(loan_amount * JEONSE_LOAN_RATE / 12)
-    else:
-        return monthly_rent + round(deposit * 0.04 / 12)
+        return monthly_rent + round(own_cash * CASH_OPPORTUNITY_RATE / 12) + round(loan_amount * loan_rate / 12)
+    return monthly_rent + round(deposit * CASH_OPPORTUNITY_RATE / 12)
 
 def calculate_hidden_life_cost(salary, commute_minutes):
     hourly_wage = (salary * 10000) / 12 / 209
@@ -436,18 +450,35 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
         # 최근 12개월 거래만 집계 (연/월을 개월 수로 환산해 비교)
         min_month_index = (now.year * 12 + now.month) - 12
 
-        raw_query = f"""
-            SELECT apt_name, dong_name, city_code,
-                   GROUP_CONCAT(deposit || ':' || monthly_rent || ':' || exclusive_area) as price_pairs,
-                   build_year
-            FROM rent_transactions
-            WHERE (deal_year * 12 + deal_month) >= ?
-            {RENTAL_FILTER}
-            {area_filter}
-            {year_filter}
-            GROUP BY apt_name, dong_name, city_code
-            HAVING COUNT(*) >= 3
-        """
+        if request.resident_type == 'buy':
+            # 매매: 실거래가(deal_amount, 만원)를 보증금 자리에 넣어 동일한 집계 파이프라인을 사용한다.
+            # 해제된 거래(cancel_deal_day)는 시세로 볼 수 없으므로 제외한다.
+            raw_query = f"""
+                SELECT apt_name, dong_name, city_code,
+                       GROUP_CONCAT(deal_amount || ':0:' || exclusive_area) as price_pairs,
+                       build_year
+                FROM transactions
+                WHERE (deal_year * 12 + deal_month) >= ?
+                AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
+                AND deal_amount > 0
+                {area_filter}
+                {year_filter}
+                GROUP BY apt_name, dong_name, city_code
+                HAVING COUNT(*) >= 3
+            """
+        else:
+            raw_query = f"""
+                SELECT apt_name, dong_name, city_code,
+                       GROUP_CONCAT(deposit || ':' || monthly_rent || ':' || exclusive_area) as price_pairs,
+                       build_year
+                FROM rent_transactions
+                WHERE (deal_year * 12 + deal_month) >= ?
+                {RENTAL_FILTER}
+                {area_filter}
+                {year_filter}
+                GROUP BY apt_name, dong_name, city_code
+                HAVING COUNT(*) >= 3
+            """
         params = [min_month_index, request.min_area, request.max_area]
         if min_build_year > 0:
             params.append(min_build_year)
@@ -466,7 +497,7 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
             logger.info("IQR 필터 후 결과 없음 → min_samples=2로 완화 재시도")
             all_complexes = _filter_complexes_by_iqr(raw_rows, min_samples=2)
 
-        # 3. 직선거리 기준 후보군 100개 추출 (Fast Scan)
+        # 3. 직선거리 기준 후보군 추출 (Fast Scan, 상위 50개 정밀 분석)
         mid_lat = (request.user1.workplace.lat + (request.user2.workplace.lat if request.user2 else request.user1.workplace.lat)) / 2
         mid_lng = (request.user1.workplace.lng + (request.user2.workplace.lng if request.user2 else request.user1.workplace.lng)) / 2
         
@@ -475,8 +506,10 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
             apt_name, dong_name, city_code = row[0], row[1], row[2]
             avg_deposit, avg_rent, avg_area = int(row[3]), int(row[4]), row[5]
             
-            # 월 주거비용 계산 (보유 자금 있으면 전세대출 이자 모델 적용)
-            monthly_housing_cost = calculate_monthly_housing_cost(avg_deposit, avg_rent, request.available_cash)
+            # 월 주거비용 계산 (보유 자금이 있으면 대출 이자 모델 적용)
+            monthly_housing_cost = calculate_monthly_housing_cost(
+                avg_deposit, avg_rent, request.available_cash, request.resident_type
+            )
             if max_housing_budget > 0 and monthly_housing_cost > max_housing_budget:
                 continue
 
@@ -552,6 +585,10 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
             total_opp_cost = fixed_monthly_exp + total_hidden_life_cost
 
             nearest_stations = get_nearest_stations(spot['lat'], spot['lng'])
+            if request.resident_type == 'buy':
+                price_label = "매매"
+            else:
+                price_label = "전세" if spot['avg_rent'] == 0 else "월세"
             results.append({
                 "name": spot['name'], "lat": spot['lat'], "lng": spot['lng'],
                 "nearest_stations": nearest_stations,
@@ -564,15 +601,21 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
                 "commute_morning_2": morning_time2,
                 "commute_evening_2": evening_time2,
                 "complexes": [{
-                    "name": spot['name'], "dong": spot['dong'], "rent_type": "전세" if spot['avg_rent'] == 0 else "월세",
-                    "display_price_label": "전세" if spot['avg_rent'] == 0 else "월세",
-                    "display_price_value": f"{spot['avg_deposit']}만 / {spot['avg_rent']}만" if spot['avg_rent'] > 0 else f"{spot['avg_deposit']}만",
+                    "name": spot['name'], "dong": spot['dong'], "rent_type": price_label,
+                    "display_price_label": price_label,
+                    "display_price_value": (
+                        f"{format_price_kr(spot['avg_deposit'])} / 월 {spot['avg_rent']:,}만"
+                        if spot['avg_rent'] > 0 else format_price_kr(spot['avg_deposit'])
+                    ),
                     "fixed_monthly_exp": fixed_monthly_exp,
                     "hidden_life_cost": total_hidden_life_cost,
                     "total_opp_cost": total_opp_cost,
                     "avg_area": spot['avg_area'],
                     "loan_amount": max(0, spot['avg_deposit'] - request.available_cash) if request.available_cash > 0 else 0,
-                    "loan_monthly": round(max(0, spot['avg_deposit'] - request.available_cash) * JEONSE_LOAN_RATE / 12) if request.available_cash > 0 else 0,
+                    "loan_monthly": round(
+                        max(0, spot['avg_deposit'] - request.available_cash)
+                        * (MORTGAGE_RATE if request.resident_type == 'buy' else JEONSE_LOAN_RATE) / 12
+                    ) if request.available_cash > 0 else 0,
                 }],
                 "score": weighted_score
             })
@@ -584,6 +627,7 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
             "meta": {
                 # 카카오 REST 키가 없으면 소요시간·좌표가 모두 추정값이므로 클라이언트가 그대로 안내한다
                 "realtime_routing": is_realtime_routing_available(),
+                "resident_type": request.resident_type,
             },
         }
     except Exception:

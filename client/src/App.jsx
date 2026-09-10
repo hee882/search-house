@@ -369,7 +369,7 @@ function App() {
   const [mapCenter] = useState({ lat: 37.5665, lng: 126.9780 });
   const [zoomLevel] = useState(15);
   const [mode, setMode] = useState('single');
-  const [residentType] = useState('buy');
+  const [residentType, setResidentType] = useState('rent'); // rent=전월세, buy=매매
   const [housingRatio, setHousingRatio] = useState(0.25);
   const [availableCash, setAvailableCash] = useState(0); // 보유 자금 (만원), 0=미입력
   const [roomType, setRoomType] = useState('all');
@@ -737,8 +737,23 @@ function App() {
               </div>
 
               <div className="space-y-1.5">
+                <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">주거 형태</div>
+                <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
+                  {[{ id: 'rent', label: '전월세' }, { id: 'buy', label: '매매' }].map((option) => (
+                    <button
+                      key={option.id}
+                      onClick={() => setResidentType(option.id)}
+                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${residentType === option.id ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
                 <div className="flex items-center justify-between px-1">
-                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">보유 자금 (보증금으로 쓸 수 있는 현금)</div>
+                  <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{residentType === 'buy' ? '보유 자금 (자기자본)' : '보유 자금 (보증금으로 쓸 수 있는 현금)'}</div>
                   {availableCash > 0 && <div className="text-[10px] font-black text-blue-600">{availableCash.toLocaleString()}만원</div>}
                 </div>
                 <div className="relative group">
@@ -753,7 +768,9 @@ function App() {
                 </div>
                 {availableCash > 0 && (
                   <div className="text-[10px] font-medium text-blue-500 pl-1 leading-snug">
-                    보증금 초과분은 전세대출 금리 3.5% 이자로 계산됩니다
+                    {residentType === 'buy'
+                      ? '매매가 초과분은 주택담보대출 금리 4.2% 이자로 계산됩니다 (취득세·보유세 제외)'
+                      : '보증금 초과분은 전세대출 금리 3.5% 이자로 계산됩니다'}
                   </div>
                 )}
               </div>
