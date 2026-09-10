@@ -6,12 +6,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
-KAKAO_REST_API_KEY = 'feb433e26a2ced15800280d98c464a14' # 테스트용 키 주입
+KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
 
 def call_kakao_api(origin, destination, d_time):
     if not KAKAO_REST_API_KEY:
-        return "ERROR: No API Key"
+        return "ERROR: KAKAO_REST_API_KEY is not configured in the environment."
     url = "https://apis-navi.kakaomobility.com/v1/future/directions"
     headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY.strip()}"}
     params = {

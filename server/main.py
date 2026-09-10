@@ -1,13 +1,15 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field, model_validator
+from typing import Literal, Optional
 import math
 import json
 import os
 import logging
 import sqlite3
+import threading
+import time
 from datetime import datetime, timedelta
 from lib.kakao_api import get_kakao_commute, get_precise_coordinates
 
@@ -20,6 +22,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# Lightweight per-process protection for the expensive optimization endpoint.
+# Deployments with multiple workers should enforce the same limit at the edge too.
+OPTIMIZE_RATE_WINDOW_SECONDS = max(1, int(os.getenv("OPTIMIZE_RATE_WINDOW_SECONDS", "60")))
+OPTIMIZE_RATE_MAX_REQUESTS = max(1, int(os.getenv("OPTIMIZE_RATE_MAX_REQUESTS", "12")))
+_optimize_rate: dict[str, list[float]] = {}
+_optimize_rate_lock = threading.Lock()
+
+def _check_optimize_rate_limit(client_key: str) -> bool:
+    now = time.monotonic()
+    cutoff = now - OPTIMIZE_RATE_WINDOW_SECONDS
+    with _optimize_rate_lock:
+        recent = [stamp for stamp in _optimize_rate.get(client_key, []) if stamp > cutoff]
+        if len(recent) >= OPTIMIZE_RATE_MAX_REQUESTS:
+            _optimize_rate[client_key] = recent
+            return False
+        recent.append(now)
+        _optimize_rate[client_key] = recent
+        # Prevent abandoned client keys from growing without bound.
+        if len(_optimize_rate) > 10_000:
+            for key, stamps in list(_optimize_rate.items()):
+                if not stamps or stamps[-1] <= cutoff:
+                    _optimize_rate.pop(key, None)
+        return True
 
 # --- CORS Configuration ---
 # GitHub Pages와 로컬 개발 환경 모두에서 안정적으로 작동하도록 설정
@@ -42,26 +68,34 @@ app.add_middleware(
 
 # --- Models ---
 class Location(BaseModel):
-    lat: float
-    lng: float
-    name: str = "Unknown"
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    name: str = Field(default="Unknown", min_length=1, max_length=200)
 
 class UserProfile(BaseModel):
     workplace: Location
-    salary: int
-    transport: str
+    salary: int = Field(ge=0, le=1_000_000)
+    transport: Literal["public", "car"]
 
 class OptimizeRequest(BaseModel):
     user1: UserProfile
     user2: Optional[UserProfile] = None
-    mode: str = 'single'
-    resident_type: str = 'buy'
-    housing_ratio: float = 0.25
-    min_area: float = 40
-    max_area: float = 200
-    max_building_age: int = 0
-    preference: str = 'balance' # money, balance, time
-    available_cash: int = 0    # 보유 자금 (만원), 0이면 기존 기회비용 모델 사용
+    mode: Literal["single", "couple"] = "single"
+    resident_type: Literal["buy", "rent"] = "buy"
+    housing_ratio: float = Field(default=0.25, gt=0, le=1)
+    min_area: float = Field(default=40, gt=0, le=1_000)
+    max_area: float = Field(default=200, gt=0, le=1_000)
+    max_building_age: int = Field(default=0, ge=0, le=200)
+    preference: Literal["money", "balance", "time"] = "balance"
+    available_cash: int = Field(default=0, ge=0, le=100_000_000)
+
+    @model_validator(mode="after")
+    def validate_request_consistency(self):
+        if self.min_area > self.max_area:
+            raise ValueError("min_area must be less than or equal to max_area")
+        if self.mode == "couple" and self.user2 is None:
+            raise ValueError("user2 is required when mode is couple")
+        return self
 
 # --- Paths ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -199,7 +233,11 @@ def calculate_hidden_life_cost(salary, commute_minutes):
     return round((base_time_value * multiplier) / 10000)
 
 @app.get("/api/stats/transactions")
-async def get_transaction_stats(city_code: str, year: int = None, month: int = None):
+async def get_transaction_stats(
+    city_code: str = Query(..., pattern=r"^\d{5}$"),
+    year: Optional[int] = Query(None, ge=1900, le=2100),
+    month: Optional[int] = Query(None, ge=1, le=12),
+):
     if not os.path.exists(DB_PATH):
         raise HTTPException(status_code=404, detail="DB not found")
     try:
@@ -264,13 +302,16 @@ async def get_transaction_stats(city_code: str, year: int = None, month: int = N
             },
             "daily": daily
         }
-    except Exception as e:
-        logger.error(f"Stats error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Stats request failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/stats/new-highs")
-async def get_new_highs(city_code: str, limit: int = 20):
+async def get_new_highs(
+    city_code: str = Query(..., pattern=r"^\d{5}$"),
+    limit: int = Query(20, ge=1, le=100),
+):
     if not os.path.exists(DB_PATH):
         raise HTTPException(status_code=404, detail="DB not found")
     try:
@@ -308,9 +349,9 @@ async def get_new_highs(city_code: str, limit: int = 20):
                 "increase_rate": increase_rate
             })
         return {"city_code": city_code, "items": items}
-    except Exception as e:
-        logger.error(f"New highs error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("New-highs request failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/stations")
@@ -321,7 +362,10 @@ async def get_stations():
     return STATIONS_DATA
 
 @app.post("/api/optimize")
-async def optimize_location(request: OptimizeRequest):
+def optimize_location(request: OptimizeRequest, http_request: Request):
+    client_host = http_request.client.host if http_request.client else "unknown"
+    if not _check_optimize_rate_limit(client_host):
+        raise HTTPException(status_code=429, detail="Too many optimization requests. Please retry later.")
     try:
         # 1. 날짜 및 시간 설정 (차주 월요일 기준)
         now = datetime.now()
@@ -517,9 +561,9 @@ async def optimize_location(request: OptimizeRequest):
         # 최종 가성비 순으로 정렬
         results.sort(key=lambda x: x['score'])
         return {"results": results[:5]}
-    except Exception as e:
-        logger.error(f"Global Scan error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Optimize request failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # --- Static Frontend Serving ---
 # mount("/")가 API 라우트 이후의 모든 경로를 처리하므로 별도 catchall 라우트는 불필요

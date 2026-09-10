@@ -14,7 +14,7 @@ load_dotenv()
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "search_house.db")
 REGIONS_PATH = os.path.join(os.path.dirname(__file__), "data", "region_codes.json")
 API_KEY = os.getenv("DATA_API_KEY")
-API_URL = "http://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
+API_URL = "https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
 
 def get_latest_month():
     return datetime.now().strftime("%Y%m")

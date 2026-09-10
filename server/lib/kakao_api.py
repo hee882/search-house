@@ -1,8 +1,10 @@
 import os
 import requests
 import json
+import math
 import sqlite3
 import logging
+from contextlib import closing
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -11,6 +13,14 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
+CACHE_TTL_SECONDS = int(os.getenv("COMMUTE_CACHE_TTL_SECONDS", "900"))
+
+
+def _connect(db_path):
+    """SQLite 커넥션 생성 (동시 접근 시 5초까지 대기)"""
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA busy_timeout = 5000")
+    return conn
 
 # city_code → 구/시 이름 역방향 조회 테이블 (정밀 검색 쿼리 구성용)
 def _build_code_to_district():
@@ -33,21 +43,24 @@ def get_precise_coordinates(db_path, apt_name, dong_name, city_code=None):
     카카오 키워드/주소 검색 API를 통해 단지의 정밀 좌표를 반환.
     DB 캐싱 지원.
     """
-    # 1. 캐시 확인
+    # 1. 캐시 확인 (외부 API 호출 전에 커넥션을 반드시 닫는다)
+    normalized_city = str(city_code or "")
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS complex_coords (
-                apt_name TEXT, dong_name TEXT,
-                lat REAL, lng REAL,
-                PRIMARY KEY (apt_name, dong_name)
-            )
-        ''')
-        cursor.execute('SELECT lat, lng FROM complex_coords WHERE apt_name = ? AND dong_name = ?', (apt_name, dong_name))
-        cache = cursor.fetchone()
+        with closing(_connect(db_path)) as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS complex_coords_v2 (
+                    city_code TEXT NOT NULL, apt_name TEXT NOT NULL, dong_name TEXT NOT NULL,
+                    lat REAL, lng REAL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (city_code, apt_name, dong_name)
+                )
+            ''')
+            conn.commit()
+            cache = conn.execute(
+                'SELECT lat, lng FROM complex_coords_v2 WHERE city_code = ? AND apt_name = ? AND dong_name = ?',
+                (normalized_city, apt_name, dong_name),
+            ).fetchone()
         if cache:
-            conn.close()
             return cache[0], cache[1]
     except Exception as e:
         logger.error(f"Complex cache lookup error: {e}")
@@ -93,14 +106,18 @@ def get_precise_coordinates(db_path, apt_name, dong_name, city_code=None):
     # 3. 결과 캐싱 및 반환
     if lat and lng:
         try:
-            cursor.execute('INSERT OR IGNORE INTO complex_coords (apt_name, dong_name, lat, lng) VALUES (?, ?, ?, ?)', (apt_name, dong_name, lat, lng))
-            conn.commit()
-            conn.close()
+            with closing(_connect(db_path)) as conn:
+                conn.execute(
+                    '''INSERT OR REPLACE INTO complex_coords_v2
+                       (city_code, apt_name, dong_name, lat, lng, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?)''',
+                    (normalized_city, apt_name, dong_name, lat, lng, datetime.now().timestamp()),
+                )
+                conn.commit()
         except Exception as e:
             logger.error(f"Complex cache save error: {e}")
         return lat, lng
-    
-    if 'conn' in locals() and conn: conn.close()
+
     return None, None
 
 def call_kakao_api(origin_lng, origin_lat, dest_lng, dest_lat, d_time):
@@ -141,24 +158,28 @@ def get_kakao_commute(db_path, from_lat, from_lng, to_lat, to_lng, transport_mod
     # 1. 캐시 확인
     cache_key = departure_time if departure_time else f"arrive_{goal_arrive_time}"
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS commute_cache_v3 (
-                from_lat REAL, from_lng REAL, to_lat REAL, to_lng REAL,
-                transport_mode TEXT, cache_key TEXT,
-                duration_min INTEGER, distance_km REAL,
-                PRIMARY KEY (from_lat, from_lng, to_lat, to_lng, transport_mode, cache_key)
-            )
-        ''')
-        cursor.execute('''
-            SELECT duration_min, distance_km FROM commute_cache_v3
-            WHERE from_lat = ? AND from_lng = ? AND to_lat = ? AND to_lng = ? 
-            AND transport_mode = ? AND cache_key = ?
-        ''', (f_lat, f_lng, t_lat, t_lng, transport_mode, cache_key))
-        cache = cursor.fetchone()
+        with closing(_connect(db_path)) as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS commute_cache_v3 (
+                    from_lat REAL, from_lng REAL, to_lat REAL, to_lng REAL,
+                    transport_mode TEXT, cache_key TEXT,
+                    duration_min INTEGER, distance_km REAL,
+                    PRIMARY KEY (from_lat, from_lng, to_lat, to_lng, transport_mode, cache_key)
+                )
+            ''')
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(commute_cache_v3)")}
+            if "updated_at" not in columns:
+                conn.execute("ALTER TABLE commute_cache_v3 ADD COLUMN updated_at REAL")
+                conn.execute("UPDATE commute_cache_v3 SET updated_at = ? WHERE updated_at IS NULL", (datetime.now().timestamp(),))
+            conn.commit()
+            cache = conn.execute('''
+                SELECT duration_min, distance_km FROM commute_cache_v3
+                WHERE from_lat = ? AND from_lng = ? AND to_lat = ? AND to_lng = ?
+                AND transport_mode = ? AND cache_key = ?
+                AND updated_at IS NOT NULL AND updated_at >= ?
+            ''', (f_lat, f_lng, t_lat, t_lng, transport_mode, cache_key,
+                  datetime.now().timestamp() - CACHE_TTL_SECONDS)).fetchone()
         if cache:
-            conn.close()
             return cache[0], cache[1]
     except Exception as e:
         logger.error(f"Cache lookup error: {e}")
@@ -176,7 +197,7 @@ def get_kakao_commute(db_path, from_lat, from_lng, to_lat, to_lng, transport_mod
         goal_h, goal_m = int(goal_arrive_time[:2]), int(goal_arrive_time[2:])
         test_departure = target_date.replace(hour=goal_h, minute=goal_m) - timedelta(minutes=45)
         
-        res1 = call_kakao_api(from_lng, from_lat, to_lng, to_lat, test_departure.strftime("%Y%m%d%H%M"))
+        res1 = call_kakao_api(from_lng, from_lat, to_lng, to_lat, test_departure.strftime("%Y%m%d%H%M")) if transport_mode == 'car' else None
         if res1:
             dur1, dist1 = res1
             actual_arrive = test_departure + timedelta(minutes=dur1)
@@ -184,7 +205,7 @@ def get_kakao_commute(db_path, from_lat, from_lng, to_lat, to_lng, transport_mod
             diff_min = (actual_arrive - target_arrive).total_seconds() / 60
             if abs(diff_min) > 5:
                 refined_departure = test_departure - timedelta(minutes=int(diff_min))
-                res2 = call_kakao_api(from_lng, from_lat, to_lng, to_lat, refined_departure.strftime("%Y%m%d%H%M"))
+                res2 = call_kakao_api(from_lng, from_lat, to_lng, to_lat, refined_departure.strftime("%Y%m%d%H%M")) if transport_mode == 'car' else None
                 if res2: duration, distance = res2
                 else: duration, distance = dur1, dist1
             else:
@@ -192,13 +213,12 @@ def get_kakao_commute(db_path, from_lat, from_lng, to_lat, to_lng, transport_mod
     
     elif departure_time:
         current_hour = int(departure_time[8:10])
-        res = call_kakao_api(from_lng, from_lat, to_lng, to_lat, departure_time)
+        res = call_kakao_api(from_lng, from_lat, to_lng, to_lat, departure_time) if transport_mode == 'car' else None
         if res: duration, distance = res
 
     # 3. Fallback (API 실패 혹은 대중교통)
     if not duration:
         R = 6371
-        import math
         dLat, dLon = math.radians(to_lat - from_lat), math.radians(to_lng - from_lng)
         a = math.sin(dLat/2)**2 + math.cos(math.radians(from_lat)) * math.cos(math.radians(to_lat)) * math.sin(dLon/2)**2
         dist = R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
@@ -210,15 +230,15 @@ def get_kakao_commute(db_path, from_lat, from_lng, to_lat, to_lng, transport_mod
         elif 17 <= current_hour <= 18: traffic_multiplier = 1.20
         duration = int(base_duration * traffic_multiplier) + (15 if transport_mode == 'public' else 5)
 
-    # 4. 결과 캐싱
+    # 4. 결과 캐싱 (TTL 만료된 기존 행은 새 값으로 갱신해야 하므로 REPLACE 사용)
     try:
-        cursor.execute('''
-            INSERT OR IGNORE INTO commute_cache_v3
-            (from_lat, from_lng, to_lat, to_lng, transport_mode, cache_key, duration_min, distance_km)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (f_lat, f_lng, t_lat, t_lng, transport_mode, cache_key, duration, distance))
-        conn.commit()
-        conn.close()
+        with closing(_connect(db_path)) as conn:
+            conn.execute('''
+                INSERT OR REPLACE INTO commute_cache_v3
+                (from_lat, from_lng, to_lat, to_lng, transport_mode, cache_key, duration_min, distance_km, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (f_lat, f_lng, t_lat, t_lng, transport_mode, cache_key, duration, distance, datetime.now().timestamp()))
+            conn.commit()
     except Exception as e:
         logger.error(f"Cache save error: {e}")
 

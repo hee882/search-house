@@ -128,7 +128,7 @@ def _backfill_new_high_prices(cursor):
         UPDATE transactions SET is_new_high_price = 1
         WHERE id IN (
             SELECT t1.id FROM transactions t1
-            WHERE t1.cancel_deal_day IS NULL OR t1.cancel_deal_day = ''
+            WHERE (t1.cancel_deal_day IS NULL OR t1.cancel_deal_day = '')
             AND t1.deal_amount = (
                 SELECT MAX(t2.deal_amount) FROM transactions t2
                 WHERE t2.apt_name = t1.apt_name

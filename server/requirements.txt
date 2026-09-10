@@ -2,7 +2,6 @@ fastapi
 uvicorn
 python-dotenv
 requests
-python-dotenv
 pandas
 beautifulsoup4
 playwright

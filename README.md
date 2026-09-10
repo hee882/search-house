@@ -62,7 +62,15 @@ python main.py     # http://localhost:8000
 `server/.env` 설정:
 ```
 DATA_API_KEY=<공공데이터포털 Decoding 키>
+KAKAO_REST_API_KEY=<카카오 REST 키>
+# 선택: 고비용 최적화 요청 보호 (기본 12회/60초/IP)
+OPTIMIZE_RATE_MAX_REQUESTS=12
+OPTIMIZE_RATE_WINDOW_SECONDS=60
+# 선택: 통근 캐시 만료(초, 기본 900)
+COMMUTE_CACHE_TTL_SECONDS=900
 ```
+
+`/api/optimize`는 IP별 요청 제한을 적용하며 초과 시 `429`를 반환합니다. 대중교통 모드는 자동차 경로 API를 호출하지 않고 검증된 거리 기반 추정치를 사용합니다. 통근·단지 좌표 캐시는 만료 정책과 지역코드별 키를 사용합니다.
 
 ### 데이터 수집
 ```bash
