@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getProvider } from './index';
 
 export function useMap(containerRef, { center, zoom }) {
-  const provider = getProvider();
+  const { lat, lng } = center;
+  const provider = useMemo(() => getProvider(), []);
   const initRef = useRef(false);
+  const initialViewRef = useRef({ center, zoom });
   const [map, setMap] = useState(null);
   const [isReady, setIsReady] = useState(false);
   const [error, setError] = useState(null);
@@ -12,26 +14,33 @@ export function useMap(containerRef, { center, zoom }) {
     if (!containerRef.current) return;
     if (initRef.current) return;
     initRef.current = true;
+    let cancelled = false;
 
     provider
       .loadSDK()
       .then(() => {
-        if (!containerRef.current) return;
-        const instance = provider.createMap(containerRef.current, center, zoom);
+        if (cancelled || !containerRef.current) return;
+        const instance = provider.createMap(containerRef.current, initialViewRef.current.center, initialViewRef.current.zoom);
         setMap(instance);
         setIsReady(true);
       })
       .catch((err) => {
-        setError(err.message);
+        if (!cancelled) setError(err instanceof Error ? err.message : '지도 SDK를 불러오지 못했습니다.');
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+    return () => {
+      cancelled = true;
+      // React StrictMode re-runs effects in development. Allow the next
+      // invocation to initialize the SDK/map again after this one is cleaned up.
+      initRef.current = false;
+    };
+  }, [containerRef, provider]);
 
   useEffect(() => {
     if (!map) return;
-    provider.setCenter(map, center);
+    provider.setCenter(map, { lat, lng });
     provider.setZoom(map, zoom);
-  }, [map, center.lat, center.lng, zoom, provider]);
+  }, [map, lat, lng, zoom, provider]);
 
   return { map, isReady, error };
 }

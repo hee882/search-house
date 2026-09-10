@@ -19,6 +19,20 @@ const LINE_COLORS = {
 
 const getLineColor = (line) => LINE_COLORS[line.trim()] || '#A0AEC0';
 const getShortLineName = (line) => line.trim();
+const REQUEST_TIMEOUT_MS = 15000;
+
+const fetchWithTimeout = async (url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+};
+
+const getRequestErrorMessage = (error, fallback) =>
+  error?.name === 'AbortError' ? '요청 시간이 초과되었습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.' : fallback;
 
 const getTimeStatus = (minutes) => {
   if (minutes <= 30) return { color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100', dot: 'bg-green-500' };
@@ -160,7 +174,7 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
           placeholder={placeholder}
         />
         {(keyword || (isOpen && isMobile)) && (
-          <button 
+            <button aria-label="검색어 지우기"
             onClick={() => { setKeyword(""); if(isMobile) setIsOpen(false); }}
             className={`absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600 rounded-full bg-gray-200/50 ${isOpen && isMobile ? 'right-8' : ''}`}
           >
@@ -178,7 +192,7 @@ function StationSearch({ value, onChange, placeholder, stations, icon: IconCompo
         `}>
           <div className="px-4 py-3 bg-gray-50/50 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 flex justify-between items-center">
             <span>{stationLoading ? '데이터 로딩 중...' : (!keyword ? '주요 거점 추천' : '검색 결과')}</span>
-            {stationError && <button onClick={onRetry} className="text-blue-600 hover:underline">재시도</button>}
+            {stationError && <button onClick={onRetry} className="text-blue-600 hover:underline" aria-label="지하철역 목록 다시 불러오기">재시도</button>}
           </div>
           {stationLoading ? (
             <div className="p-12 flex flex-col items-center gap-4">
@@ -239,7 +253,7 @@ function HelpModal({ isOpen, onClose }) {
               <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">당신의 시간을 되찾는 방법</span>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-all active:scale-90"><X size={18} className="text-gray-500" /></button>
+          <button onClick={onClose} aria-label="사용 가이드 닫기" className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-all active:scale-90"><X size={18} className="text-gray-500" /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar">
@@ -359,6 +373,7 @@ function App() {
   const [stationList, setStationList] = useState([]);
   const [stationLoading, setStationLoading] = useState(true);
   const [stationError, setStationError] = useState(null);
+  const [searchError, setSearchError] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
 
   const mapContainerRef = useRef(null);
@@ -372,13 +387,13 @@ function App() {
     setStationLoading(true); setStationError(null);
     for (let i = 0; i < 3; i++) {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/stations`);
+        const res = await fetchWithTimeout(`${API_BASE_URL}/api/stations`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        if (data.length > 0) { setStationList(data); setStationLoading(false); return; }
+        if (Array.isArray(data) && data.length > 0 && data.every(station => station && typeof station.name === 'string')) { setStationList(data); setStationLoading(false); return; }
         throw new Error('데이터 없음');
       } catch (e) {
-        if (i === 2) { setStationError(e.message); setStationLoading(false); return; }
+        if (i === 2) { setStationError(getRequestErrorMessage(e, '지하철역 목록을 불러오지 못했습니다.')); setStationLoading(false); return; }
         await new Promise(r => setTimeout(r, 1500 * (i + 1)));
       }
     }
@@ -479,8 +494,12 @@ function App() {
 
   useEffect(() => { window.dispatchSpotClick = (index) => { if (results && results[index]) handleSpotClick(results[index], index); }; }, [results, handleSpotClick]);
 
+  const usesCarRouting = inputs.user1.transport === 'car' || (mode === 'couple' && inputs.user2.transport === 'car');
+
   const handleSearch = async () => {
-    if (!inputs.user1.workplace) { alert("나의 직장 위치를 선택해 주세요."); return; }
+    setSearchError(null);
+    if (!inputs.user1.workplace) { setSearchError("나의 직장 위치를 선택해 주세요."); return; }
+    if (mode === 'couple' && !inputs.user2.workplace) { setSearchError("커플 모드에서는 배우자의 직장 위치도 선택해 주세요."); return; }
     const sleep = (ms) => new Promise(res => setTimeout(res, ms));
     setLoading(true);
     try {
@@ -505,16 +524,19 @@ function App() {
       setLoadingMessage("수도권 3만 개 단지 실거래 데이터 필터링 중..."); await sleep(800);
       setLoadingMessage(`${inputs.user1.salary}만원 연봉 기반 최적 예산 구간 산출 완료`); await sleep(600);
       setLoadingMessage("08:00 출근 피크 실시간 교통망 시뮬레이션 중...");
-      const fetchPromise = fetch(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const fetchPromise = fetchWithTimeout(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 30000);
       await sleep(1200); setLoadingMessage("기회비용 및 피로도 가중치 랭킹 산출 중...");
       const response = await fetchPromise;
       if (!response.ok) throw new Error(`분석 요청 실패 (HTTP ${response.status})`);
       const data = await response.json();
+      if (!data || !Array.isArray(data.results)) throw new Error('INVALID_RESPONSE');
+      const validResults = data.results.filter(spot => spot && Number.isFinite(Number(spot.lat)) && Number.isFinite(Number(spot.lng)) && Array.isArray(spot.complexes));
+      if (validResults.length !== data.results.length) throw new Error('INVALID_RESPONSE');
 
       // 클라이언트 사이드 좌표 보정: 카카오 지도 JS SDK로 단지 정밀 위치 조회
       setLoadingMessage("단지 위치 정밀 보정 중...");
       const geocodedResults = await Promise.all(
-        (data.results || []).map(async (spot) => {
+        validResults.map(async (spot) => {
           const dong = spot.complexes?.[0]?.dong || '';
           const query = `${dong} ${spot.name}`.trim();
           try {
@@ -542,22 +564,35 @@ function App() {
         setExpandedSpotIndex(0); setExpandedComplexIdx(0);
         setTimeout(() => { drawCommutePaths(geocodedResults[0], { user1: loc1, user2: loc2 }, mode); }, 600);
       }
-    } catch (err) { console.error(err); alert("분석 중 오류가 발생했습니다."); } finally { setLoading(false); setLoadingMessage(""); }
+    } catch (err) {
+      console.error(err);
+      setSearchError(err?.message === 'INVALID_RESPONSE'
+        ? '서버에서 올바르지 않은 응답을 받았습니다. 잠시 후 다시 시도해 주세요.'
+        : getRequestErrorMessage(err, '분석 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'));
+    } finally { setLoading(false); setLoadingMessage(""); }
   };
 
   return (
     <div className="relative w-full h-[100dvh] overflow-hidden antialiased bg-gray-50 text-gray-900 font-sans">
       <div ref={mapContainerRef} className="absolute inset-0 w-full h-full z-0 bg-gray-100 flex items-center justify-center">
         {!isReady && !mapError && (
-          <div className="flex flex-col items-center space-y-4">
+          <div className="flex flex-col items-center space-y-4" role="status" aria-live="polite">
             <Loader2 className="animate-spin text-blue-500" size={40} />
             <p className="text-sm font-bold text-gray-400 text-center px-6">지능형 지도를 로드하고 있습니다...</p>
+          </div>
+        )}
+        {mapError && (
+          <div className="max-w-sm mx-6 rounded-2xl border border-red-100 bg-white/95 p-5 text-center shadow-lg" role="alert">
+            <AlertTriangle className="mx-auto mb-3 text-red-500" size={30} />
+            <p className="text-sm font-black text-gray-900">지도를 불러오지 못했습니다</p>
+            <p className="mt-1 text-xs font-bold text-gray-500">네트워크 또는 지도 API 설정을 확인한 뒤 페이지를 새로고침해 주세요.</p>
+            <button onClick={() => window.location.reload()} className="mt-4 rounded-xl bg-gray-900 px-4 py-2 text-xs font-black text-white">페이지 새로고침</button>
           </div>
         )}
       </div>
 
       {loading && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-white/70 backdrop-blur-md animate-in fade-in duration-300">
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-white/70 backdrop-blur-md animate-in fade-in duration-300" role="status" aria-live="polite" aria-busy="true">
           <div className="flex flex-col items-center space-y-6 max-w-[280px] text-center">
             <div className="relative">
               <div className="absolute inset-0 bg-blue-400/20 rounded-full animate-ping" />
@@ -584,7 +619,7 @@ function App() {
           : (isSidebarOpen ? 'translate-x-0' : '-translate-x-full')
         }
       `}>
-        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className={`hidden md:flex absolute top-1/2 -right-4 -translate-y-1/2 w-8 h-12 bg-white border border-gray-100 shadow-sm rounded-r-xl items-center justify-center text-gray-400 hover:text-blue-600 transition-all z-[1100]`}>
+        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} aria-label={isSidebarOpen ? '검색 패널 닫기' : '검색 패널 열기'} className={`hidden md:flex absolute top-1/2 -right-4 -translate-y-1/2 w-8 h-12 bg-white border border-gray-100 shadow-sm rounded-r-xl items-center justify-center text-gray-400 hover:text-blue-600 transition-all z-[1100]`}>
           {isSidebarOpen ? <ChevronLeft size={20} strokeWidth={3} /> : <ChevronRight size={20} strokeWidth={3} className="ml-4" />}
         </button>
 
@@ -600,8 +635,8 @@ function App() {
                 <span className="text-lg md:text-2xl font-black uppercase tracking-tight text-slate-900">Search House</span>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => setShowHelp(true)} className="p-2 bg-gray-100 rounded-full transition-colors hover:bg-blue-50 active:bg-blue-100" title="사용 가이드"><HelpCircle size={16} className="text-gray-400 hover:text-blue-500" /></button>
-                <button onClick={() => { if(window.innerWidth < 768) setMobileSheetState('hidden'); else setIsSidebarOpen(false); }} className="p-2 bg-gray-100 rounded-full md:hidden transition-colors active:bg-gray-200"><X size={20} /></button>
+                <button onClick={() => setShowHelp(true)} aria-label="사용 가이드 열기" className="p-2 bg-gray-100 rounded-full transition-colors hover:bg-blue-50 active:bg-blue-100" title="사용 가이드"><HelpCircle size={16} className="text-gray-400 hover:text-blue-500" /></button>
+                <button onClick={() => { if(window.innerWidth < 768) setMobileSheetState('hidden'); else setIsSidebarOpen(false); }} aria-label="검색 패널 닫기" className="p-2 bg-gray-100 rounded-full md:hidden transition-colors active:bg-gray-200"><X size={20} /></button>
               </div>
             </div>
 
@@ -639,8 +674,8 @@ function App() {
                   <div className="shrink-0 space-y-1">
                     <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">이동 수단</div>
                     <div className="flex bg-gray-100 rounded-xl p-0.5 h-[42px]">
-                      <button onClick={() => setInputs({...inputs, user1: {...inputs.user1, transport: 'public'}})} className={`px-3 rounded-lg ${inputs.user1.transport === 'public' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}><Bus size={16} /></button>
-                      <button onClick={() => setInputs({...inputs, user1: {...inputs.user1, transport: 'car'}})} className={`px-3 rounded-lg ${inputs.user1.transport === 'car' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}><Car size={16} /></button>
+                      <button onClick={() => setInputs({...inputs, user1: {...inputs.user1, transport: 'public'}})} aria-label="내 이동 수단 대중교통" className={`px-3 rounded-lg ${inputs.user1.transport === 'public' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}><Bus size={16} /></button>
+                      <button onClick={() => setInputs({...inputs, user1: {...inputs.user1, transport: 'car'}})} aria-label="내 이동 수단 자동차" className={`px-3 rounded-lg ${inputs.user1.transport === 'car' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}><Car size={16} /></button>
                     </div>
                   </div>
                 </div>
@@ -659,8 +694,8 @@ function App() {
                     <div className="shrink-0 space-y-1">
                       <div className="text-[10px] font-black text-pink-400 uppercase tracking-widest pl-1">이동 수단</div>
                       <div className="flex bg-gray-100 rounded-xl p-0.5 h-[42px]">
-                        <button onClick={() => setInputs({...inputs, user2: {...inputs.user2, transport: 'public'}})} className={`px-3 rounded-lg ${inputs.user2.transport === 'public' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}><Bus size={16} /></button>
-                        <button onClick={() => setInputs({...inputs, user2: {...inputs.user2, transport: 'car'}})} className={`px-3 rounded-lg ${inputs.user2.transport === 'car' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}><Car size={16} /></button>
+                        <button onClick={() => setInputs({...inputs, user2: {...inputs.user2, transport: 'public'}})} aria-label="배우자 이동 수단 대중교통" className={`px-3 rounded-lg ${inputs.user2.transport === 'public' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}><Bus size={16} /></button>
+                        <button onClick={() => setInputs({...inputs, user2: {...inputs.user2, transport: 'car'}})} aria-label="배우자 이동 수단 자동차" className={`px-3 rounded-lg ${inputs.user2.transport === 'car' ? 'bg-white shadow-sm text-pink-500' : 'text-gray-400'}`}><Car size={16} /></button>
                       </div>
                     </div>
                   </div>
@@ -719,7 +754,13 @@ function App() {
                 <div className="flex-1 space-y-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">집 크기</div><div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">{[['all', '전체'], ['10', '10평대'], ['20', '20평대'], ['30', '30평대'], ['40', '40평+']].map(([val, label]) => (<button key={val} onClick={() => setRoomType(val)} className={`flex-1 py-1.5 rounded-lg text-[10px] font-black transition-all ${roomType === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>{label}</button>))}</div></div>
                 <div className="flex-1 space-y-1"><div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">준공</div><div className="flex bg-gray-100 rounded-xl p-0.5 gap-0.5">{[[0, '전체'], [5, '5년'], [10, '10년'], [20, '20년']].map(([val, label]) => (<button key={val} onClick={() => setBuildingAge(val)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition-all ${buildingAge === val ? 'bg-white shadow-sm text-blue-600' : 'text-gray-400'}`}>{label}</button>))}</div></div>
               </div>
-              <div className="pt-1 px-1"><p className="text-[9px] font-black text-gray-300">※ 네이버 API 08:00 도착 / 18:00 출발 실시간 교통 반영</p></div>
+              <div className="pt-1 px-1"><p className="text-[9px] font-black text-gray-300">{usesCarRouting ? '※ 카카오 길찾기 API 08:00 도착 / 18:00 출발 실시간 교통 반영' : '※ 대중교통 소요시간은 거리·출근 시간대 기반 추정치입니다'}</p></div>
+              {searchError && (
+                <div className="rounded-xl border border-red-100 bg-red-50 p-3" role="alert" aria-live="assertive">
+                  <p className="text-[11px] font-bold text-red-700">{searchError}</p>
+                  <button onClick={handleSearch} disabled={loading || !isReady} className="mt-2 text-[11px] font-black text-red-700 underline disabled:opacity-50">다시 시도</button>
+                </div>
+              )}
               <button onClick={handleSearch} disabled={loading || !isReady} className="w-full bg-gray-900 hover:bg-black text-white font-black py-4 rounded-xl shadow-xl active:scale-[0.98] flex items-center justify-center space-x-2 transition-all">{loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} strokeWidth={3} />}<span>스마트 주거 탐색 시작</span></button>
             </div>
             )}
@@ -905,7 +946,7 @@ function App() {
         </div>
       )}
 
-      <button onClick={() => setMobileSheetState(prev => prev === 'hidden' ? 'peek' : 'full')} className="md:hidden absolute bottom-8 right-6 z-[1100] w-14 h-14 bg-gray-900 text-white rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all border-2 border-white/20">
+      <button onClick={() => setMobileSheetState(prev => prev === 'hidden' ? 'peek' : 'full')} aria-label={mobileSheetState === 'full' ? '검색 패널 접기' : '검색 패널 열기'} className="md:hidden absolute bottom-8 right-6 z-[1100] w-14 h-14 bg-gray-900 text-white rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all border-2 border-white/20">
         {mobileSheetState === 'full' ? <ChevronDown size={24} /> : (results ? <Settings2 size={24} /> : <Search size={24} />)}
       </button>
 
