@@ -558,9 +558,14 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
         cursor = conn.cursor()
         
         # 단지별 전체 거래를 GROUP_CONCAT으로 가져와 Python에서 IQR 아웃라이어 제거
-        # 보증금 3000만원 미만 = 공공임대·갱신 특수계약으로 간주 1차 제외
+        # 공공임대는 단지명으로 걸러낸다. 보증금 하한은 전세에만 적용한다.
+        # (예전에는 보증금 3000만 하한을 월세에도 걸어 '보증금 1000/월 70' 같은
+        #  일반 월세 거래 2만여 건, 전체의 13%가 통째로 빠졌다)
         RENTAL_FILTER = """
-            AND deposit >= 3000
+            AND (
+                (monthly_rent = 0 AND deposit >= 3000)
+                OR (monthly_rent >= 10)
+            )
             AND apt_name NOT LIKE '%임대%'
             AND apt_name NOT LIKE '%행복주택%'
             AND apt_name NOT LIKE '%LH%'
