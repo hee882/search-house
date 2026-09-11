@@ -282,6 +282,52 @@ def diversify_results(results, limit=MAX_RESULTS, per_dong=MAX_RESULTS_PER_DONG)
     return picked
 
 
+def get_collected_period(table, city_code=None):
+    """해당 테이블(지역)에 실제로 수집된 거래월 범위와 수집된 월 수를 반환.
+
+    조회한 달에 데이터가 0건일 때 "거래가 없었던 달"인지 "아직 수집되지 않은 달"인지
+    호출자가 구분할 수 있어야 한다.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            where, params = "", []
+            if city_code:
+                where, params = "WHERE city_code = ?", [city_code]
+            row = conn.execute(
+                f"""SELECT MIN(deal_year * 100 + deal_month), MAX(deal_year * 100 + deal_month),
+                           COUNT(DISTINCT deal_year * 100 + deal_month)
+                    FROM {table} {where}""",
+                params,
+            ).fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception("Collected period lookup failed")
+        return None
+
+    if not row or row[0] is None:
+        return {"first_month": None, "last_month": None, "collected_months": 0}
+    return {"first_month": str(row[0]), "last_month": str(row[1]), "collected_months": row[2]}
+
+
+def is_month_collected(table, city_code, year, month):
+    """해당 지역·월이 수집된 적 있는지 (0건 응답의 의미를 구분하기 위함)"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            row = conn.execute(
+                f"SELECT 1 FROM {table} WHERE city_code = ? AND deal_year = ? AND deal_month = ? LIMIT 1",
+                (city_code, year, month),
+            ).fetchone()
+        finally:
+            conn.close()
+        return row is not None
+    except Exception:
+        logger.exception("Month coverage lookup failed")
+        return False
+
+
 def candidate_distance_score(lat, lng, workplaces):
     """후보지 선별용 거리 점수 (작을수록 좋음).
 
@@ -399,6 +445,7 @@ async def get_transaction_stats(
         finally:
             conn.close()
 
+        coverage = get_collected_period("transactions", city_code) or {}
         return {
             "city_code": city_code,
             "period": f"{year}-{month:02d}",
@@ -408,7 +455,12 @@ async def get_transaction_stats(
                 "cancel_count": cancel_count,
                 "buyer_types": buyer_types
             },
-            "daily": daily
+            "daily": daily,
+            # 수집되지 않은 달도 total 0으로 보이므로 수집 여부를 함께 알려준다
+            "coverage": {
+                "requested_month_collected": is_month_collected("transactions", city_code, year, month),
+                **coverage,
+            },
         }
     except Exception:
         logger.exception("Stats request failed")
@@ -456,7 +508,12 @@ async def get_new_highs(
                 "prev_high": prev,
                 "increase_rate": increase_rate
             })
-        return {"city_code": city_code, "items": items}
+        # 신고가 판정은 수집된 기간 안에서의 최고가 기준이므로 그 범위를 함께 알려준다
+        return {
+            "city_code": city_code,
+            "items": items,
+            "coverage": get_collected_period("transactions", city_code) or {},
+        }
     except Exception:
         logger.exception("New-highs request failed")
         raise HTTPException(status_code=500, detail="Internal server error")

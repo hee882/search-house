@@ -272,6 +272,63 @@ class CandidateSelectionTests(TestCase):
         self.assertTrue(all(d > 0 for d in distances))
 
 
+class StatsCoverageTests(TestCase):
+    def _db_with_rows(self, directory, months):
+        db_path = str(Path(directory) / "stats.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """
+            CREATE TABLE transactions (
+                id INTEGER PRIMARY KEY, city_code TEXT, deal_year INTEGER, deal_month INTEGER,
+                deal_day INTEGER, deal_amount INTEGER, apt_name TEXT, dong_name TEXT,
+                exclusive_area REAL, cancel_deal_day TEXT, is_new_high_price INTEGER DEFAULT 0,
+                buyer_type TEXT
+            )
+            """
+        )
+        for index, (year, month) in enumerate(months, start=1):
+            conn.execute(
+                "INSERT INTO transactions (id, city_code, deal_year, deal_month, deal_day, deal_amount,"
+                " apt_name, dong_name, exclusive_area) VALUES (?, '11680', ?, ?, 1, 50000, 'A', 'D', 84)",
+                (index, year, month),
+            )
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def test_collected_period_reports_first_and_last_month(self):
+        with TemporaryDirectory() as tmp:
+            db_path = self._db_with_rows(tmp, [(2025, 2), (2026, 3), (2026, 9)])
+            with mock.patch.object(main, "DB_PATH", db_path):
+                period = main.get_collected_period("transactions", "11680")
+        self.assertEqual(period["first_month"], "202502")
+        self.assertEqual(period["last_month"], "202609")
+        self.assertEqual(period["collected_months"], 3)
+
+    def test_uncollected_month_is_distinguishable_from_zero_deals(self):
+        with TemporaryDirectory() as tmp:
+            db_path = self._db_with_rows(tmp, [(2026, 9)])
+            with mock.patch.object(main, "DB_PATH", db_path):
+                self.assertTrue(main.is_month_collected("transactions", "11680", 2026, 9))
+                self.assertFalse(main.is_month_collected("transactions", "11680", 2025, 7))
+
+    def test_stats_response_includes_coverage(self):
+        with TemporaryDirectory() as tmp:
+            db_path = self._db_with_rows(tmp, [(2026, 9)])
+            with mock.patch.object(main, "DB_PATH", db_path):
+                response = self.__class__.client.get(
+                    "/api/stats/transactions", params={"city_code": "11680", "year": 2025, "month": 7}
+                )
+        payload = response.json()
+        self.assertEqual(payload["summary"]["total"], 0)
+        self.assertFalse(payload["coverage"]["requested_month_collected"])
+        self.assertEqual(payload["coverage"]["last_month"], "202609")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(main.app, raise_server_exceptions=False)
+
+
 class ResultDiversityTests(TestCase):
     def _spot(self, name, dong):
         return {"name": name, "dong": dong}
