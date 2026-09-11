@@ -26,9 +26,18 @@ def is_realtime_routing_available():
 
 
 def _connect(db_path):
-    """SQLite 커넥션 생성 (동시 접근 시 5초까지 대기)"""
+    """SQLite 커넥션 생성.
+
+    후보를 병렬로 분석하면 캐시 쓰기가 동시에 몰린다. 기본 journal 모드에서는
+    쓰기마다 DB 전체에 락이 걸려 계산만 하는 호출도 초 단위로 밀렸다.
+    WAL은 DB 파일에 한 번 기록되는 속성이라 매번 설정해도 비용이 거의 없다.
+    """
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA busy_timeout = 5000")
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.Error as e:  # 읽기 전용 파일시스템 등
+        logger.debug(f"WAL 설정 실패: {e}")
     return conn
 
 # city_code → 구/시 이름 역방향 조회 테이블 (정밀 검색 쿼리 구성용)

@@ -17,6 +17,10 @@ venv/
 .idea/
 .vscode/
 
+# SQLite WAL 부산물 (DB 본체만 추적)
+*.db-wal
+*.db-shm
+
 # Logs
 npm-debug.log*
 yarn-debug.log*

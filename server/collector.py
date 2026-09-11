@@ -338,6 +338,15 @@ def run_collector(target_month=None, months=3):
 
     print(f"Finished. Total {grand_total} records saved/updated in DB.")
 
+    # WAL 모드에서는 변경분이 -wal 파일에 남을 수 있다.
+    # CI가 커밋하는 것은 DB 본체뿐이므로 종료 전에 합쳐준다.
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.close()
+    except Exception as e:
+        print(f"WAL checkpoint failed: {e}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Collect real estate transaction data.")

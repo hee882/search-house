@@ -10,6 +10,7 @@ import logging
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from lib.kakao_api import (get_kakao_commute, get_precise_coordinates,
                            is_realtime_routing_available, estimate_commute)
@@ -256,6 +257,9 @@ MAX_RESULTS_PER_DONG = 2
 # 후보 전부를 정밀 분석하면 요청 한 번에 경로·지오코딩 API를 200회 가까이 호출하게 된다.
 CANDIDATE_SCAN_LIMIT = 50
 PRECISE_ANALYSIS_LIMIT = max(MAX_RESULTS, int(os.getenv("OPTIMIZE_PRECISE_LIMIT", "12")))
+# 정밀 분석은 후보마다 독립적인 외부 API 호출이라 병렬로 처리한다.
+# (순차 처리 시 캐시가 비어 있으면 요청 하나가 10초를 넘긴다)
+PRECISE_ANALYSIS_WORKERS = max(1, int(os.getenv("OPTIMIZE_PRECISE_WORKERS", "6")))
 
 
 def diversify_results(results, limit=MAX_RESULTS, per_dong=MAX_RESULTS_PER_DONG):
@@ -733,26 +737,34 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
         finalists = [spot for _, spot in screened[:PRECISE_ANALYSIS_LIMIT]]
 
         # 3-2. 정밀 분석: 좁혀진 후보만 실제 좌표·경로 API로 계산한다.
-        for spot in finalists:
-            # [고도화] 단지별 정밀 좌표 획득 시도 (동 좌표 -> 실제 단지 위치)
+        def measure_commute(spot):
+            """한 후보의 정밀 좌표와 출퇴근 소요시간을 구한다 (후보 간 독립적이라 병렬 실행)."""
             precise_lat, precise_lng = get_precise_coordinates(DB_PATH, spot['name'], spot['dong'], spot['city_code'])
             if precise_lat and precise_lng:
                 spot['lat'], spot['lng'] = precise_lat, precise_lng
-                
-            # 카카오 정밀 경로 분석 (출근/퇴근 각각)
-            # 출근: 08:00 도착 시뮬레이션
-            morning_time1, _ = get_kakao_commute(DB_PATH, spot['lat'], spot['lng'], request.user1.workplace.lat, request.user1.workplace.lng, request.user1.transport, goal_arrive_time="0800")
-            # 퇴근: 18:00 정시 출발
-            evening_time1, _ = get_kakao_commute(DB_PATH, request.user1.workplace.lat, request.user1.workplace.lng, spot['lat'], spot['lng'], request.user1.transport, departure_time=time_evening)
-            
+
+            times = []
+            for (w_lat, w_lng), profile in zip(workplaces, profiles):
+                # 출근: 08:00 도착 시뮬레이션 / 퇴근: 18:00 정시 출발
+                morning, _ = get_kakao_commute(DB_PATH, spot['lat'], spot['lng'], w_lat, w_lng,
+                                               profile.transport, goal_arrive_time="0800")
+                evening, _ = get_kakao_commute(DB_PATH, w_lat, w_lng, spot['lat'], spot['lng'],
+                                               profile.transport, departure_time=time_evening)
+                times.append((morning, evening))
+            return spot, times
+
+        with ThreadPoolExecutor(max_workers=min(PRECISE_ANALYSIS_WORKERS, max(1, len(finalists)))) as pool:
+            measured = list(pool.map(measure_commute, finalists))
+
+        for spot, commute_times in measured:
+            morning_time1, evening_time1 = commute_times[0]
             avg_time1 = (morning_time1 + evening_time1) // 2
-            
+
             morning_time2, evening_time2, avg_time2 = 0, 0, 0
-            if request.mode == 'couple' and request.user2:
-                morning_time2, _ = get_kakao_commute(DB_PATH, spot['lat'], spot['lng'], request.user2.workplace.lat, request.user2.workplace.lng, request.user2.transport, goal_arrive_time="0800")
-                evening_time2, _ = get_kakao_commute(DB_PATH, request.user2.workplace.lat, request.user2.workplace.lng, spot['lat'], spot['lng'], request.user2.transport, departure_time=time_evening)
+            if len(commute_times) > 1:
+                morning_time2, evening_time2 = commute_times[1]
                 avg_time2 = (morning_time2 + evening_time2) // 2
-            
+
             # 기회비용 계산 (평균 시간 기준)
             hidden_cost1 = calculate_hidden_life_cost(request.user1.salary, avg_time1)
             hidden_cost2 = calculate_hidden_life_cost(request.user2.salary, avg_time2) if request.mode == 'couple' and request.user2 else 0
