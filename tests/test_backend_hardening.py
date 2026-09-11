@@ -250,6 +250,55 @@ class ContractTypeDetectionTests(TestCase):
                 self.assertFalse(main._rent_table_has_contract_type())
 
 
+class CandidateSelectionTests(TestCase):
+    GANGNAM = (37.4979, 127.0276)
+    KINTEX = (37.6686, 126.7472)
+
+    def test_balanced_location_beats_one_sided_location_for_couples(self):
+        workplaces = [self.GANGNAM, self.KINTEX]
+        balanced, _ = main.candidate_distance_score(37.5665, 126.8895, workplaces)   # 상암동
+        one_sided, _ = main.candidate_distance_score(*self.GANGNAM, workplaces)      # 강남역 바로 옆
+        self.assertLess(balanced, one_sided)
+
+    def test_single_mode_score_is_monotonic_in_distance(self):
+        workplaces = [self.GANGNAM]
+        near, _ = main.candidate_distance_score(37.5000, 127.0300, workplaces)
+        far, _ = main.candidate_distance_score(37.6686, 126.7472, workplaces)
+        self.assertLess(near, far)
+
+    def test_score_returns_distance_per_workplace(self):
+        _, distances = main.candidate_distance_score(37.5665, 126.9780, [self.GANGNAM, self.KINTEX])
+        self.assertEqual(len(distances), 2)
+        self.assertTrue(all(d > 0 for d in distances))
+
+
+class ResultDiversityTests(TestCase):
+    def _spot(self, name, dong):
+        return {"name": name, "dong": dong}
+
+    def test_single_dong_cannot_occupy_every_slot(self):
+        results = [self._spot(f"상암월드컵파크{i}단지", "상암동") for i in range(1, 6)]
+        results += [
+            self._spot("망원한강", "망원동"),
+            self._spot("가양9단지", "가양동"),
+            self._spot("화곡대림", "화곡동"),
+        ]
+        picked = main.diversify_results(results)
+        self.assertEqual(len(picked), 5)
+        self.assertEqual(sum(1 for p in picked if p["dong"] == "상암동"), 2)
+        self.assertEqual(len({p["dong"] for p in picked}), 4)
+
+    def test_order_is_preserved_within_limit(self):
+        results = [self._spot("A", "1동"), self._spot("B", "2동"), self._spot("C", "3동")]
+        self.assertEqual([p["name"] for p in main.diversify_results(results)], ["A", "B", "C"])
+
+    def test_falls_back_to_score_order_when_not_enough_dongs(self):
+        results = [self._spot(f"단지{i}", "상암동") for i in range(1, 8)]
+        picked = main.diversify_results(results)
+        self.assertEqual(len(picked), 5)
+        self.assertEqual([p["name"] for p in picked[:2]], ["단지1", "단지2"])
+
+
 class PriceAggregationTests(TestCase):
     def test_dominant_area_bucket_is_used_instead_of_mixed_average(self):
         rows = [("단지A", "역삼동", "11680", "10000:0:59,10500:0:59,11000:0:59,30000:0:130", 2000)]

@@ -252,6 +252,48 @@ def _filter_complexes_by_iqr(raw_rows, min_samples=3):
 
     return result
 
+MAX_RESULTS = 5
+MAX_RESULTS_PER_DONG = 2
+
+
+def diversify_results(results, limit=MAX_RESULTS, per_dong=MAX_RESULTS_PER_DONG):
+    """같은 동의 단지가 결과를 독점하지 않도록 추려낸다.
+
+    점수만으로 자르면 한 단지의 1·8·9·10·11단지처럼 사실상 같은 선택지가
+    상위를 모두 차지해 비교할 대안이 사라진다. 동별 상한을 두되,
+    상한 때문에 개수를 못 채우면 남은 자리는 점수 순으로 채운다.
+    """
+    picked, counts = [], {}
+    for item in results:
+        dong = item.get("dong") or ""
+        if counts.get(dong, 0) >= per_dong:
+            continue
+        counts[dong] = counts.get(dong, 0) + 1
+        picked.append(item)
+        if len(picked) >= limit:
+            return picked
+
+    chosen = {id(item) for item in picked}
+    for item in results:
+        if len(picked) >= limit:
+            break
+        if id(item) not in chosen:
+            picked.append(item)
+    return picked
+
+
+def candidate_distance_score(lat, lng, workplaces):
+    """후보지 선별용 거리 점수 (작을수록 좋음).
+
+    거리 합만 쓰면 두 직장이 일직선일 때 "한 명은 도보, 한 명은 1시간"인 위치가
+    최상위로 올라온다. 더 먼 쪽에 가중을 더해 양쪽 모두 감당 가능한 위치를 고른다.
+    1인 모드에서는 단순히 거리의 2배라 순서가 바뀌지 않는다.
+    반환값: (점수, 각 직장까지의 거리 목록)
+    """
+    distances = [calculate_distance(lat, lng, w_lat, w_lng) for w_lat, w_lng in workplaces]
+    return sum(distances) + max(distances), distances
+
+
 def get_nearest_stations(lat, lng, n=3, max_distance_km=2.0):
     """좌표 기준 가장 가까운 지하철역 top n 반환 (2km 이내)"""
     with_dist = []
@@ -533,8 +575,11 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
             all_complexes = _filter_complexes_by_iqr(raw_rows, min_samples=2)
 
         # 3. 직선거리 기준 후보군 추출 (Fast Scan, 상위 50개 정밀 분석)
-        mid_lat = (request.user1.workplace.lat + (request.user2.workplace.lat if request.user2 else request.user1.workplace.lat)) / 2
-        mid_lng = (request.user1.workplace.lng + (request.user2.workplace.lng if request.user2 else request.user1.workplace.lng)) / 2
+        # 커플 모드에서 두 직장의 중간점을 쓰면 중간 지점이 강·산이라 실제로는 양쪽 모두
+        # 통근이 나쁜 곳이 상위로 올라온다. 각 직장까지의 실제 거리로 후보를 고른다.
+        workplaces = [(request.user1.workplace.lat, request.user1.workplace.lng)]
+        if request.mode == 'couple' and request.user2:
+            workplaces.append((request.user2.workplace.lat, request.user2.workplace.lng))
         
         candidates = []
         for row in all_complexes:
@@ -566,18 +611,18 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
             if not lat:
                 continue # 여전히 좌표 정보 없으면 제외
 
-            dist_from_mid = calculate_distance(lat, lng, mid_lat, mid_lng)
-            if dist_from_mid > 80: continue # 수도권 광역 커버 (80km)
+            dist_score, work_distances = candidate_distance_score(lat, lng, workplaces)
+            if max(work_distances) > 80: continue  # 어느 한쪽이라도 너무 멀면 제외 (수도권 광역 80km)
 
             candidates.append({
                 "name": apt_name, "dong": dong_name, "city_code": city_code,
                 "lat": lat, "lng": lng, "monthly_housing_cost": monthly_housing_cost,
-                "dist_from_mid": dist_from_mid, "avg_deposit": avg_deposit, "avg_rent": avg_rent,
+                "dist_score": dist_score, "avg_deposit": avg_deposit, "avg_rent": avg_rent,
                 "avg_area": avg_area
             })
 
         # 직장 중심점에서 가까운 순으로 50개 후보군 정밀 분석 (후보군 확대)
-        candidates.sort(key=lambda x: x['dist_from_mid'])
+        candidates.sort(key=lambda x: x['dist_score'])
         top_candidates = candidates[:50]
 
         results = []
@@ -655,10 +700,10 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
                 "score": weighted_score
             })
 
-        # 최종 가성비 순으로 정렬
+        # 최종 가성비 순으로 정렬 (같은 동이 결과를 독점하지 않도록 추려냄)
         results.sort(key=lambda x: x['score'])
         return {
-            "results": results[:5],
+            "results": diversify_results(results),
             "meta": {
                 # 카카오 REST 키가 없으면 소요시간·좌표가 모두 추정값이므로 클라이언트가 그대로 안내한다
                 "realtime_routing": is_realtime_routing_available(),
