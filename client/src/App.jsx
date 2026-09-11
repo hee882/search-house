@@ -393,6 +393,7 @@ function App() {
   const [stationError, setStationError] = useState(null);
   const [searchError, setSearchError] = useState(null);
   const [realtimeRouting, setRealtimeRouting] = useState(null); // 서버가 실제 경로 API를 쓰는지 여부
+  const [searchedResidentType, setSearchedResidentType] = useState(null); // 현재 결과가 어떤 주거 형태로 나온 것인지
   const [showHelp, setShowHelp] = useState(false);
 
   const mapContainerRef = useRef(null);
@@ -550,6 +551,7 @@ function App() {
       const data = await response.json();
       if (!data || !Array.isArray(data.results)) throw new Error('INVALID_RESPONSE');
       setRealtimeRouting(typeof data.meta?.realtime_routing === 'boolean' ? data.meta.realtime_routing : null);
+      setSearchedResidentType(data.meta?.resident_type || residentType);
       const validResults = data.results.filter(spot => spot && Number.isFinite(Number(spot.lat)) && Number.isFinite(Number(spot.lng)) && Array.isArray(spot.complexes));
       if (validResults.length !== data.results.length) throw new Error('INVALID_RESPONSE');
 
@@ -802,6 +804,13 @@ function App() {
               <div className="pt-1 px-1"><p className="text-[9px] font-black text-gray-300">{usesCarRouting && realtimeRouting !== false
                   ? '※ 카카오 길찾기 API 08:00 도착 / 18:00 출발 실시간 교통 반영'
                   : '※ 소요시간은 거리·출근 시간대 기반 추정치입니다 (08:00 도착 / 18:00 출발 기준)'}</p></div>
+              {results && searchedResidentType && searchedResidentType !== residentType && (
+                <div className="rounded-xl border border-amber-100 bg-amber-50 p-3" role="status">
+                  <p className="text-[11px] font-bold text-amber-700">
+                    현재 결과는 {searchedResidentType === 'buy' ? '매매' : '전월세'} 기준입니다. 다시 검색하면 {residentType === 'buy' ? '매매' : '전월세'} 시세로 분석합니다.
+                  </p>
+                </div>
+              )}
               {searchError && (
                 <div className="rounded-xl border border-red-100 bg-red-50 p-3" role="alert" aria-live="assertive">
                   <p className="text-[11px] font-bold text-red-700">{searchError}</p>
