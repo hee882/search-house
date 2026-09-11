@@ -272,6 +272,59 @@ class CandidateSelectionTests(TestCase):
         self.assertTrue(all(d > 0 for d in distances))
 
 
+class CommuteEstimationTests(TestCase):
+    def test_longer_distance_takes_longer(self):
+        near, near_km = kakao_api.estimate_commute(37.50, 127.00, 37.52, 127.02, "public", 8)
+        far, far_km = kakao_api.estimate_commute(37.50, 127.00, 37.70, 127.30, "public", 8)
+        self.assertLess(near, far)
+        self.assertLess(near_km, far_km)
+
+    def test_rush_hour_is_slower_than_midday(self):
+        rush, _ = kakao_api.estimate_commute(37.50, 127.00, 37.60, 127.10, "car", 8)
+        midday, _ = kakao_api.estimate_commute(37.50, 127.00, 37.60, 127.10, "car", 13)
+        self.assertGreater(rush, midday)
+
+    def test_public_transport_is_slower_than_car(self):
+        public, _ = kakao_api.estimate_commute(37.50, 127.00, 37.60, 127.10, "public", 8)
+        car, _ = kakao_api.estimate_commute(37.50, 127.00, 37.60, 127.10, "car", 8)
+        self.assertGreater(public, car)
+
+
+class PreciseAnalysisBudgetTests(TestCase):
+    """정밀 분석(외부 API 호출) 대상이 상한 안에서만 이뤄지는지 확인."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(main.app, raise_server_exceptions=False)
+
+    def test_geocoding_is_limited_to_finalists(self):
+        if not os.path.exists(main.DB_PATH):
+            self.skipTest("실거래 DB가 없는 환경")
+
+        payload = {
+            "user1": {
+                "workplace": {"lat": 37.5665, "lng": 126.9780, "name": "Office"},
+                "salary": 6000,
+                "transport": "public",
+            },
+            "mode": "single",
+            "resident_type": "rent",
+            "housing_ratio": 0.3,
+            "min_area": 40,
+            "max_area": 85,
+            "preference": "balance",
+        }
+
+        with mock.patch.object(main, "get_precise_coordinates", return_value=(None, None)) as geocode:
+            response = self.client.post("/api/optimize", json=payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLessEqual(geocode.call_count, main.PRECISE_ANALYSIS_LIMIT)
+
+    def test_precise_limit_is_at_least_result_count(self):
+        self.assertGreaterEqual(main.PRECISE_ANALYSIS_LIMIT, main.MAX_RESULTS)
+
+
 class StatsCoverageTests(TestCase):
     def _db_with_rows(self, directory, months):
         db_path = str(Path(directory) / "stats.db")

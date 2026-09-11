@@ -11,7 +11,8 @@ import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta
-from lib.kakao_api import get_kakao_commute, get_precise_coordinates, is_realtime_routing_available
+from lib.kakao_api import (get_kakao_commute, get_precise_coordinates,
+                           is_realtime_routing_available, estimate_commute)
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -179,10 +180,6 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     a = math.sin(dLat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dLon/2)**2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
-def estimate_commute_time(distance_km, transport_mode):
-    speed = 30 if transport_mode == 'car' else 20
-    return int((distance_km / speed) * 60) + (5 if transport_mode == 'car' else 10)
-
 def _filter_complexes_by_iqr(raw_rows, min_samples=3):
     """
     단지별 GROUP_CONCAT 거래 데이터에 IQR 아웃라이어 제거 적용.
@@ -254,6 +251,10 @@ def _filter_complexes_by_iqr(raw_rows, min_samples=3):
 
 MAX_RESULTS = 5
 MAX_RESULTS_PER_DONG = 2
+# 거리 기준으로 훑을 후보 수와, 그중 실제 경로 API로 정밀 분석할 수.
+# 후보 전부를 정밀 분석하면 요청 한 번에 경로·지오코딩 API를 200회 가까이 호출하게 된다.
+CANDIDATE_SCAN_LIMIT = 50
+PRECISE_ANALYSIS_LIMIT = max(MAX_RESULTS, int(os.getenv("OPTIMIZE_PRECISE_LIMIT", "12")))
 
 
 def diversify_results(results, limit=MAX_RESULTS, per_dong=MAX_RESULTS_PER_DONG):
@@ -678,14 +679,44 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
                 "avg_area": avg_area
             })
 
-        # 직장 중심점에서 가까운 순으로 50개 후보군 정밀 분석 (후보군 확대)
+        # 직장에서 가까운 순으로 1차 후보군 선별
         candidates.sort(key=lambda x: x['dist_score'])
-        top_candidates = candidates[:50]
+        top_candidates = candidates[:CANDIDATE_SCAN_LIMIT]
 
         results = []
         base_transport_cost = 10 # 기본 교통비
 
+        # 성향 가중치 (1차 스크리닝과 최종 점수에 동일하게 적용)
+        w_fixed, w_hidden = 1.0, 1.0
+        if request.preference == 'money': w_fixed, w_hidden = 1.6, 0.4
+        elif request.preference == 'time': w_fixed, w_hidden = 0.4, 1.6
+
+        profiles = [request.user1]
+        if request.mode == 'couple' and request.user2:
+            profiles.append(request.user2)
+
+        # 3-1. 1차 스크리닝: 외부 API 없이 거리 기반 추정으로 점수를 매겨 정밀 분석 대상을 좁힌다.
+        # 후보 50곳을 모두 정밀 분석하면 지오코딩·경로 API를 요청당 최대 200회 호출하게 되어
+        # 응답이 분 단위로 늘고 API 쿼터도 금방 소진된다.
+        screened = []
         for spot in top_candidates:
+            estimated_times = []
+            for (w_lat, w_lng), profile in zip(workplaces, profiles):
+                morning, _ = estimate_commute(spot['lat'], spot['lng'], w_lat, w_lng, profile.transport, 8)
+                evening, _ = estimate_commute(w_lat, w_lng, spot['lat'], spot['lng'], profile.transport, 18)
+                estimated_times.append((morning + evening) // 2)
+            estimated_hidden = sum(
+                calculate_hidden_life_cost(profile.salary, minutes)
+                for profile, minutes in zip(profiles, estimated_times)
+            )
+            estimated_fixed = spot['monthly_housing_cost'] + base_transport_cost
+            screened.append((estimated_fixed * w_fixed + estimated_hidden * w_hidden, spot))
+
+        screened.sort(key=lambda item: item[0])
+        finalists = [spot for _, spot in screened[:PRECISE_ANALYSIS_LIMIT]]
+
+        # 3-2. 정밀 분석: 좁혀진 후보만 실제 좌표·경로 API로 계산한다.
+        for spot in finalists:
             # [고도화] 단지별 정밀 좌표 획득 시도 (동 좌표 -> 실제 단지 위치)
             precise_lat, precise_lng = get_precise_coordinates(DB_PATH, spot['name'], spot['dong'], spot['city_code'])
             if precise_lat and precise_lng:
@@ -712,11 +743,6 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
             # 성향 가중치 적용
             fixed_monthly_exp = spot['monthly_housing_cost'] + base_transport_cost
             total_hidden_life_cost = hidden_cost1 + hidden_cost2
-            
-            # 가중치 설정
-            w_fixed, w_hidden = 1.0, 1.0
-            if request.preference == 'money': w_fixed, w_hidden = 1.6, 0.4
-            elif request.preference == 'time': w_fixed, w_hidden = 0.4, 1.6
             
             weighted_score = int(fixed_monthly_exp * w_fixed + total_hidden_life_cost * w_hidden)
             total_opp_cost = fixed_monthly_exp + total_hidden_life_cost

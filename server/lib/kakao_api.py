@@ -157,6 +157,30 @@ def call_kakao_api(origin_lng, origin_lat, dest_lng, dest_lat, d_time):
         logger.error(f"API Call failed: {e}")
     return None
 
+def estimate_commute(from_lat, from_lng, to_lat, to_lng, transport_mode='car', hour=8):
+    """경로 API 없이 거리·시간대만으로 통근 시간(분)과 거리(km)를 추정한다.
+
+    실제 경로 API 호출은 비싸므로 후보를 좁히는 1차 스크리닝과
+    API 실패 시 대체값으로 모두 이 함수를 사용한다.
+    """
+    R = 6371
+    d_lat = math.radians(to_lat - from_lat)
+    d_lng = math.radians(to_lng - from_lng)
+    a = (math.sin(d_lat / 2) ** 2
+         + math.cos(math.radians(from_lat)) * math.cos(math.radians(to_lat)) * math.sin(d_lng / 2) ** 2)
+    distance = R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    speed = 25 if transport_mode == 'public' else 35
+    base_duration = (distance / speed) * 60
+    traffic_multiplier = 1.0
+    if 7 <= hour <= 8:
+        traffic_multiplier = 1.35
+    elif 17 <= hour <= 18:
+        traffic_multiplier = 1.20
+    duration = int(base_duration * traffic_multiplier) + (15 if transport_mode == 'public' else 5)
+    return duration, distance
+
+
 def get_kakao_commute(db_path, from_lat, from_lng, to_lat, to_lng, transport_mode='car', departure_time=None, goal_arrive_time=None):
     """
     카카오 모빌리티 API를 통해 정밀 통근 시간을 반환 (시뮬레이션 포함).
@@ -227,17 +251,7 @@ def get_kakao_commute(db_path, from_lat, from_lng, to_lat, to_lng, transport_mod
 
     # 3. Fallback (API 실패 혹은 대중교통)
     if not duration:
-        R = 6371
-        dLat, dLon = math.radians(to_lat - from_lat), math.radians(to_lng - from_lng)
-        a = math.sin(dLat/2)**2 + math.cos(math.radians(from_lat)) * math.cos(math.radians(to_lat)) * math.sin(dLon/2)**2
-        dist = R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        distance = dist
-        speed = 25 if transport_mode == 'public' else 35
-        base_duration = (dist / speed) * 60
-        traffic_multiplier = 1.0
-        if 7 <= current_hour <= 8: traffic_multiplier = 1.35
-        elif 17 <= current_hour <= 18: traffic_multiplier = 1.20
-        duration = int(base_duration * traffic_multiplier) + (15 if transport_mode == 'public' else 5)
+        duration, distance = estimate_commute(from_lat, from_lng, to_lat, to_lng, transport_mode, current_hour)
 
     # 4. 결과 캐싱 (TTL 만료된 기존 행은 새 값으로 갱신해야 하므로 REPLACE 사용)
     try:
