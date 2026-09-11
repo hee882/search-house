@@ -272,6 +272,49 @@ class CandidateSelectionTests(TestCase):
         self.assertTrue(all(d > 0 for d in distances))
 
 
+class ResidentTypeSelectionTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(main.app, raise_server_exceptions=False)
+
+    def _payload(self, resident_type):
+        return {
+            "user1": {
+                "workplace": {"lat": 37.5665, "lng": 126.9780, "name": "Office"},
+                "salary": 6000,
+                "transport": "public",
+            },
+            "mode": "single",
+            "resident_type": resident_type,
+            "housing_ratio": 0.3,
+            "min_area": 40,
+            "max_area": 85,
+            "preference": "balance",
+        }
+
+    def test_unknown_resident_type_is_rejected(self):
+        response = self.client.post("/api/optimize", json=self._payload("lease"))
+        self.assertEqual(response.status_code, 422)
+
+    def test_jeonse_request_returns_only_jeonse(self):
+        if not os.path.exists(main.DB_PATH):
+            self.skipTest("실거래 DB가 없는 환경")
+        response = self.client.post("/api/optimize", json=self._payload("jeonse"))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["meta"]["resident_type"], "jeonse")
+        for result in payload["results"]:
+            self.assertEqual(result["complexes"][0]["display_price_label"], "전세")
+
+    def test_wolse_request_returns_only_wolse(self):
+        if not os.path.exists(main.DB_PATH):
+            self.skipTest("실거래 DB가 없는 환경")
+        response = self.client.post("/api/optimize", json=self._payload("wolse"))
+        self.assertEqual(response.status_code, 200)
+        for result in response.json()["results"]:
+            self.assertEqual(result["complexes"][0]["display_price_label"], "월세")
+
+
 class CommuteEstimationTests(TestCase):
     def test_longer_distance_takes_longer(self):
         near, near_km = kakao_api.estimate_commute(37.50, 127.00, 37.52, 127.02, "public", 8)

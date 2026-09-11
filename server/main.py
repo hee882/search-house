@@ -82,7 +82,8 @@ class OptimizeRequest(BaseModel):
     user1: UserProfile
     user2: Optional[UserProfile] = None
     mode: Literal["single", "couple"] = "single"
-    resident_type: Literal["buy", "rent"] = "buy"
+    # rent = 전월세 전체(거래가 많은 유형으로 자동), jeonse/wolse = 사용자가 직접 선택
+    resident_type: Literal["buy", "rent", "jeonse", "wolse"] = "buy"
     housing_ratio: float = Field(default=0.25, gt=0, le=1)
     min_area: float = Field(default=40, gt=0, le=1_000)
     max_area: float = Field(default=200, gt=0, le=1_000)
@@ -589,6 +590,16 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
         # 최근 12개월 거래만 집계 (연/월을 개월 수로 환산해 비교)
         min_month_index = (now.year * 12 + now.month) - 12
 
+        # 전세/월세를 직접 고른 경우 해당 유형만 집계한다.
+        # (선택하지 않으면 거래가 많은 유형이 대표 시세가 되어, 전세를 찾는 사용자에게
+        #  월세 단지가 섞여 나왔다)
+        if request.resident_type == 'jeonse':
+            rent_type_filter = " AND monthly_rent = 0"
+        elif request.resident_type == 'wolse':
+            rent_type_filter = " AND monthly_rent > 0"
+        else:
+            rent_type_filter = ""
+
         if request.resident_type == 'buy':
             # 매매: 실거래가(deal_amount, 만원)를 보증금 자리에 넣어 동일한 집계 파이프라인을 사용한다.
             # 해제된 거래(cancel_deal_day)는 시세로 볼 수 없으므로 제외한다.
@@ -614,6 +625,7 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
                 WHERE (deal_year * 12 + deal_month) >= ?
                 {RENTAL_FILTER}
                 {contract_filter}
+                {rent_type_filter}
                 {area_filter}
                 {year_filter}
                 GROUP BY apt_name, dong_name, city_code

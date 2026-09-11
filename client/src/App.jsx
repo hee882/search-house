@@ -49,6 +49,14 @@ const findNearestStations = (lat, lng, stations, count = 3, maxDistanceKm = 2) =
     .slice(0, count)
     .map((item) => item.name);
 
+const RESIDENT_TYPES = [
+  { id: 'jeonse', label: '전세' },
+  { id: 'wolse', label: '월세' },
+  { id: 'buy', label: '매매' },
+];
+
+const getResidentTypeLabel = (id) => RESIDENT_TYPES.find((type) => type.id === id)?.label || '전월세';
+
 const getRequestErrorMessage = (error, fallback) =>
   error?.name === 'AbortError' ? '요청 시간이 초과되었습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.' : fallback;
 
@@ -369,7 +377,7 @@ function App() {
   const [mapCenter] = useState({ lat: 37.5665, lng: 126.9780 });
   const [zoomLevel] = useState(15);
   const [mode, setMode] = useState('single');
-  const [residentType, setResidentType] = useState('rent'); // rent=전월세, buy=매매
+  const [residentType, setResidentType] = useState('jeonse'); // jeonse/wolse/buy
   const [housingRatio, setHousingRatio] = useState(0.25);
   const [availableCash, setAvailableCash] = useState(0); // 보유 자금 (만원), 0=미입력
   const [roomType, setRoomType] = useState('all');
@@ -741,7 +749,7 @@ function App() {
               <div className="space-y-1.5">
                 <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">주거 형태</div>
                 <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
-                  {[{ id: 'rent', label: '전월세' }, { id: 'buy', label: '매매' }].map((option) => (
+                  {RESIDENT_TYPES.map((option) => (
                     <button
                       key={option.id}
                       onClick={() => setResidentType(option.id)}
@@ -807,7 +815,7 @@ function App() {
               {results && searchedResidentType && searchedResidentType !== residentType && (
                 <div className="rounded-xl border border-amber-100 bg-amber-50 p-3" role="status">
                   <p className="text-[11px] font-bold text-amber-700">
-                    현재 결과는 {searchedResidentType === 'buy' ? '매매' : '전월세'} 기준입니다. 다시 검색하면 {residentType === 'buy' ? '매매' : '전월세'} 시세로 분석합니다.
+                    현재 결과는 {getResidentTypeLabel(searchedResidentType)} 기준입니다. 다시 검색하면 {getResidentTypeLabel(residentType)} 시세로 분석합니다.
                   </p>
                 </div>
               )}
