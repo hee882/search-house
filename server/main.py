@@ -108,6 +108,7 @@ FRONTEND_DIST = os.path.join(BASE_DIR, "client", "dist")
 STATIONS_DATA = []
 DONG_COORDS = {}
 DISTRICT_CENTERS = {}  # city_code -> 구 내 동 좌표의 평균(대표 좌표)
+RENT_HAS_CONTRACT_TYPE = False  # 수집기가 계약구분(신규/갱신)을 저장하기 시작했는지
 
 def _build_district_centers(dong_coords):
     """구(city_code)별 동 좌표 평균을 대표 좌표로 계산.
@@ -127,8 +128,24 @@ def _build_district_centers(dong_coords):
         for code, points in buckets.items()
     }
 
+def _rent_table_has_contract_type():
+    """rent_transactions에 계약구분 컬럼이 있는지 확인.
+
+    수집기 스키마 확장 이전에 만들어진 DB에서도 동작해야 하므로 런타임에 확인한다.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(rent_transactions)")}
+        finally:
+            conn.close()
+        return "contract_type" in columns
+    except Exception:
+        return False
+
+
 def load_global_data():
-    global STATIONS_DATA, DONG_COORDS, DISTRICT_CENTERS
+    global STATIONS_DATA, DONG_COORDS, DISTRICT_CENTERS, RENT_HAS_CONTRACT_TYPE
     try:
         if os.path.exists(STATIONS_PATH):
             with open(STATIONS_PATH, "r", encoding="utf-8") as f:
@@ -141,6 +158,9 @@ def load_global_data():
             logger.info(f"Loaded {len(DONG_COORDS)} dong coordinates")
         DISTRICT_CENTERS = _build_district_centers(DONG_COORDS)
         logger.info(f"Built {len(DISTRICT_CENTERS)} district centers")
+
+        RENT_HAS_CONTRACT_TYPE = _rent_table_has_contract_type()
+        logger.info(f"Rent contract_type column available: {RENT_HAS_CONTRACT_TYPE}")
     except Exception as e:
         logger.error(f"Failed to load global data: {e}")
 
@@ -456,6 +476,9 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
             AND apt_name NOT LIKE '%오피스텔%'
         """
         area_filter = "AND exclusive_area >= ? AND exclusive_area <= ?"
+        # 갱신계약은 2년 전 보증금에 상한이 걸린 값이라 지금 들어갈 수 있는 시세보다 낮다.
+        # 실측 기준 같은 단지·면적대에서 신규계약 대비 중앙값 -9.2% 수준이어서 제외한다.
+        contract_filter = " AND (contract_type IS NULL OR contract_type != '갱신')" if RENT_HAS_CONTRACT_TYPE else ""
         year_filter = " AND build_year >= ?" if min_build_year > 0 else ""
 
         # 최근 12개월 거래만 집계 (연/월을 개월 수로 환산해 비교)
@@ -485,6 +508,7 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
                 FROM rent_transactions
                 WHERE (deal_year * 12 + deal_month) >= ?
                 {RENTAL_FILTER}
+                {contract_filter}
                 {area_filter}
                 {year_filter}
                 GROUP BY apt_name, dong_name, city_code

@@ -185,6 +185,71 @@ class RoutingModeTests(TestCase):
             self.assertTrue(kakao_api.is_realtime_routing_available())
 
 
+class CollectorScheduleTests(TestCase):
+    def test_recent_months_walks_back_across_year_boundary(self):
+        class FrozenDatetime:
+            @staticmethod
+            def now():
+                return datetime(2026, 2, 5)
+
+        with mock.patch.object(collector, "datetime", FrozenDatetime):
+            self.assertEqual(collector.recent_months(4), ["202602", "202601", "202512", "202511"])
+
+    def test_recent_months_returns_at_least_one_month(self):
+        self.assertEqual(len(collector_rent.recent_months(0)), 1)
+
+    def test_rent_collector_declares_contract_columns(self):
+        for column in ("contract_type", "use_rr_right", "apt_seq", "road_name"):
+            self.assertIn(column, collector_rent.EXTRA_COLUMNS)
+
+    def test_ensure_table_adds_missing_columns_to_legacy_schema(self):
+        with TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "legacy.db")
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                """
+                CREATE TABLE rent_transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    city_code TEXT, dong_name TEXT, apt_name TEXT, exclusive_area REAL,
+                    deal_year INTEGER, deal_month INTEGER, deal_day INTEGER,
+                    deposit INTEGER, monthly_rent INTEGER, floor INTEGER, build_year INTEGER,
+                    UNIQUE(city_code, apt_name, dong_name, deal_year, deal_month, deal_day,
+                           deposit, monthly_rent, floor)
+                )
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch.object(collector_rent, "DB_PATH", db_path):
+                collector_rent.ensure_table()
+
+            conn = sqlite3.connect(db_path)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(rent_transactions)")}
+            conn.close()
+
+        self.assertTrue(set(collector_rent.EXTRA_COLUMNS).issubset(columns))
+
+
+class ContractTypeDetectionTests(TestCase):
+    def test_detects_contract_type_column(self):
+        with TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "rent.db")
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE rent_transactions (id INTEGER, contract_type TEXT)")
+            conn.commit()
+            conn.close()
+            with mock.patch.object(main, "DB_PATH", db_path):
+                self.assertTrue(main._rent_table_has_contract_type())
+
+    def test_missing_column_or_table_is_reported_as_unavailable(self):
+        with TemporaryDirectory() as tmp:
+            db_path = str(Path(tmp) / "empty.db")
+            sqlite3.connect(db_path).close()
+            with mock.patch.object(main, "DB_PATH", db_path):
+                self.assertFalse(main._rent_table_has_contract_type())
+
+
 class PriceAggregationTests(TestCase):
     def test_dominant_area_bucket_is_used_instead_of_mixed_average(self):
         rows = [("단지A", "역삼동", "11680", "10000:0:59,10500:0:59,11000:0:59,30000:0:130", 2000)]

@@ -82,8 +82,11 @@ python server/build_dong_coords.py --force    # 기존 좌표까지 갱신
 위 스크립트를 실행하면 실거래 DB에 등장하는 동을 카카오 로컬 API로 채운다.
 
 ### 데이터 수집
+실거래 신고 기한이 계약 후 30일이라 당월만 수집하면 그 달 후반 신고분이 영구 누락된다.
+두 수집기 모두 기본으로 최근 3개월을 다시 훑어(UPSERT) 지연 신고와 정정 내역을 반영한다.
+
 ```bash
-python server/collector.py                  # 현재월 수집
+python server/collector.py                  # 최근 3개월 재수집
 python server/collector.py --month 202403   # 특정월 수집
 ```
 

@@ -292,7 +292,20 @@ def fetch_and_save(city_code, deal_ymd):
     return total_saved
 
 
-def run_collector(target_month=None):
+def recent_months(count):
+    """현재월부터 과거로 count개월치 YYYYMM 목록"""
+    now = datetime.now()
+    months = []
+    year, month = now.year, now.month
+    for _ in range(max(1, count)):
+        months.append(f"{year}{month:02d}")
+        month -= 1
+        if month == 0:
+            year, month = year - 1, 12
+    return months
+
+
+def run_collector(target_month=None, months=3):
     if not API_KEY:
         print("Error: DATA_API_KEY not found in environment.")
         return
@@ -302,28 +315,35 @@ def run_collector(target_month=None):
     with open(REGIONS_PATH, "r", encoding="utf-8") as f:
         regions = json.load(f)
 
-    if not target_month:
-        target_month = get_latest_month()
+    # 실거래 신고 기한이 계약 후 30일이라 당월만 수집하면 후반 신고분이 영구 누락된다.
+    # 기본으로 최근 몇 개월을 다시 훑어 지연 신고와 정정 내역을 반영한다.
+    target_months = [target_month] if target_month else recent_months(months)
 
-    print(f"Starting data collection for {target_month}...")
+    print(f"Starting data collection for {', '.join(target_months)}...")
 
-    total_new = 0
-    for province, cities in regions.items():
-        print(f"Processing {province}...")
-        for city_name, code in cities.items():
-            try:
-                new_records = fetch_and_save(code, target_month)
-                total_new += new_records
-                print(f"  - {city_name}: {new_records} new records saved.")
-            except Exception as e:
-                print(f"  - An error occurred while processing {city_name} ({code}): {e}")
+    grand_total = 0
+    for deal_ymd in target_months:
+        total_new = 0
+        for province, cities in regions.items():
+            print(f"[{deal_ymd}] Processing {province}...")
+            for city_name, code in cities.items():
+                try:
+                    new_records = fetch_and_save(code, deal_ymd)
+                    total_new += new_records
+                    print(f"  - {city_name}: {new_records} records saved/updated.")
+                except Exception as e:
+                    print(f"  - An error occurred while processing {city_name} ({code}): {e}")
+        print(f"[{deal_ymd}] {total_new} records saved/updated.")
+        grand_total += total_new
 
-    print(f"Finished. Total {total_new} new records added to DB.")
+    print(f"Finished. Total {grand_total} records saved/updated in DB.")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Collect real estate transaction data for a specific month.")
-    parser.add_argument("--month", type=str, help="The target month in YYYYMM format. Defaults to the current month.")
+    parser = argparse.ArgumentParser(description="Collect real estate transaction data.")
+    parser.add_argument("--month", type=str, help="The target month in YYYYMM format. Defaults to recent months.")
+    parser.add_argument("--months", type=int, default=3,
+                        help="How many recent months to re-collect when --month is omitted (default 3).")
     args = parser.parse_args()
 
-    run_collector(target_month=args.month)
+    run_collector(target_month=args.month, months=args.months)

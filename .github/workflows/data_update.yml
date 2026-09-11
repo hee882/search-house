@@ -7,8 +7,12 @@ on:
   workflow_dispatch:
     inputs:
       month:
-        description: 'Target month (YYYYMM format). Leave empty for current month.'
+        description: 'Target month (YYYYMM). Leave empty to re-collect recent months.'
         required: false
+      months:
+        description: 'How many recent months to re-collect when month is empty (default 3).'
+        required: false
+        default: '3'
 
 jobs:
   update-real-estate-data:
@@ -29,6 +33,8 @@ jobs:
         run: |
           pip install requests xmltodict python-dotenv
 
+      # 실거래 신고 기한이 계약 후 30일이라 당월만 받으면 해당 월 후반 신고분을 놓친다.
+      # 기본으로 최근 3개월을 다시 훑어 지연 신고와 정정 내역까지 반영한다.
       - name: Run MOLIT Data collector
         env:
           DATA_API_KEY: ${{ secrets.DATA_API_KEY }}
@@ -38,9 +44,11 @@ jobs:
             python server/collector.py --month "${{ github.event.inputs.month }}"
             python server/collector_rent.py --month "${{ github.event.inputs.month }}"
           else
-            echo "Running collector for current month."
-            python server/collector.py
-            python server/collector_rent.py
+            MONTHS="${{ github.event.inputs.months }}"
+            MONTHS="${MONTHS:-3}"
+            echo "Re-collecting the last $MONTHS months."
+            python server/collector.py --months "$MONTHS"
+            python server/collector_rent.py --months "$MONTHS"
           fi
 
       - name: Commit and Push Database Update
