@@ -22,6 +22,44 @@ import main
 from lib import kakao_api
 
 
+# 개발자 PC 에는 server/.env 에 실제 REST 키가 있어, 그대로 두면 optimize 테스트가
+# 한 번 돌 때마다 카카오 지오코딩을 수십 회 실제로 호출한다.
+_kakao_key_patch = mock.patch.object(kakao_api, "KAKAO_REST_API_KEY", None)
+# 키를 직접 지정하는 테스트도 있어 키를 비우는 것만으로는 호출이 없었다고 말할 수 없다.
+# HTTP 헬퍼 자체를 막아 두고 모듈이 끝날 때 호출 횟수를 확인한다.
+_kakao_http_patch = mock.patch.object(
+    kakao_api, "_http_get",
+    side_effect=AssertionError("test_backend_hardening must not call the Kakao API"),
+)
+_kakao_http_spy = None
+
+
+def setUpModule():
+    global _kakao_http_spy
+    _kakao_key_patch.start()
+    _kakao_http_spy = _kakao_http_patch.start()
+
+
+def tearDownModule():
+    calls = _kakao_http_spy.call_args_list
+    _kakao_http_patch.stop()
+    _kakao_key_patch.stop()
+    # kakao_api 는 호출 실패를 삼키고 추정치로 넘어가므로 개별 테스트는 통과해 버린다.
+    if calls:
+        raise AssertionError(f"Kakao HTTP helper was called {len(calls)} time(s): {calls[0]}")
+
+
+class KakaoIsolationTests(TestCase):
+    def test_module_runs_without_rest_key(self):
+        self.assertIsNone(kakao_api.KAKAO_REST_API_KEY)
+        self.assertFalse(kakao_api.is_realtime_routing_available())
+
+    def test_key_set_inside_a_test_is_dropped_afterwards(self):
+        with mock.patch.object(kakao_api, "KAKAO_REST_API_KEY", "0123456789abcdef0123456789abcdef"):
+            self.assertTrue(kakao_api.is_realtime_routing_available())
+        self.assertIsNone(kakao_api.KAKAO_REST_API_KEY)
+
+
 class ConfigurationHardeningTests(TestCase):
     def test_debug_api_uses_environment_key_and_clear_missing_key_message(self):
         source = (SERVER_DIR / "debug_api_results.py").read_text(encoding="utf-8")
@@ -125,6 +163,8 @@ class NewHighBackfillTests(TestCase):
             """
             CREATE TABLE transactions (
                 id INTEGER PRIMARY KEY,
+                city_code TEXT,
+                apt_seq TEXT,
                 apt_name TEXT,
                 dong_name TEXT,
                 exclusive_area REAL,
@@ -140,11 +180,11 @@ class NewHighBackfillTests(TestCase):
         cursor.executemany(
             """
             INSERT INTO transactions
-            (id, apt_name, dong_name, exclusive_area, deal_amount, deal_year,
+            (id, city_code, apt_name, dong_name, exclusive_area, deal_amount, deal_year,
              deal_month, deal_day, cancel_deal_day)
-            VALUES (?, 'A', 'D', 84, ?, 2025, 1, ?, NULL)
+            VALUES (?, '11680', 'A', 'D', 84, ?, 2025, 1, ?, NULL)
             """,
-            [(1, 500, 1), (2, 400, 2)],
+            [(1, 500, 1), (2, 400, 2), (3, 600, 3)],
         )
 
         collector._backfill_new_high_prices(cursor)
@@ -152,7 +192,8 @@ class NewHighBackfillTests(TestCase):
         rows = cursor.execute(
             "SELECT id, is_new_high_price FROM transactions ORDER BY id"
         ).fetchall()
-        self.assertEqual(rows, [(1, 1), (2, 0)])
+        # 첫 거래는 비교할 이전 거래가 없어 신고가가 아니다.
+        self.assertEqual(rows, [(1, 0), (2, 0), (3, 1)])
         connection.close()
 
 

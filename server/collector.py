@@ -1,13 +1,15 @@
 import os
+import sys
 import json
 import sqlite3
 import argparse
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import xmltodict
 from datetime import datetime
 from dotenv import load_dotenv
+
+from lib.molit_response import MolitApiError, mask_service_key, parse_molit_response
 
 load_dotenv()
 
@@ -124,53 +126,54 @@ def _ensure_indexes(cursor):
 
 
 def _backfill_new_high_prices(cursor):
-    cursor.execute('''
-        UPDATE transactions SET is_new_high_price = 1
-        WHERE id IN (
-            SELECT t1.id FROM transactions t1
-            WHERE (t1.cancel_deal_day IS NULL OR t1.cancel_deal_day = '')
-            AND t1.deal_amount = (
-                SELECT MAX(t2.deal_amount) FROM transactions t2
-                WHERE t2.apt_name = t1.apt_name
-                AND t2.dong_name = t1.dong_name
-                AND t2.exclusive_area = t1.exclusive_area
-                AND (t2.cancel_deal_day IS NULL OR t2.cancel_deal_day = '')
-            )
-            AND t1.deal_amount > (
-                SELECT COALESCE(MAX(t3.deal_amount), 0) FROM transactions t3
-                WHERE t3.apt_name = t1.apt_name
-                AND t3.dong_name = t1.dong_name
-                AND t3.exclusive_area = t1.exclusive_area
-                AND (t3.cancel_deal_day IS NULL OR t3.cancel_deal_day = '')
-                AND (t3.deal_year < t1.deal_year
-                     OR (t3.deal_year = t1.deal_year AND t3.deal_month < t1.deal_month)
-                     OR (t3.deal_year = t1.deal_year AND t3.deal_month = t1.deal_month AND t3.deal_day < t1.deal_day))
-            )
-        )
-    ''')
-    count = cursor.rowcount
+    count = recompute_new_high_flags(cursor.connection)
     print(f"  Backfilled {count} new-high-price records.")
 
 
-def check_new_high(cursor, apt_seq, apt_name, dong_name, exclusive_area, deal_amount):
-    if apt_seq:
-        cursor.execute('''
-            SELECT MAX(deal_amount) FROM transactions
-            WHERE apt_seq = ? AND exclusive_area = ?
-            AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
-        ''', (apt_seq, exclusive_area))
-    else:
-        cursor.execute('''
-            SELECT MAX(deal_amount) FROM transactions
-            WHERE apt_name = ? AND dong_name = ? AND exclusive_area = ?
-            AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
-        ''', (apt_name, dong_name, exclusive_area))
-    row = cursor.fetchone()
-    max_price = row[0] if row and row[0] else 0
-    return 1 if deal_amount > max_price else 0
+def recompute_new_high_flags(conn):
+    """신고가 플래그를 표 전체에 대해 거래일 순으로 다시 계산하고, 값이 바뀐 행 수를 돌려준다.
+
+    신고가: 해제되지 않은 거래이고, 같은 단지·같은 전용면적에서 거래일이 더 이른
+    (해제되지 않은) 거래가 하나 이상 있으며, 그 모든 거래보다 금액이 큰 거래.
+    """
+    # 저장 시점에 DB 최고가와 비교하면 같은 달을 다시 수집할 때 자기 자신과 비교하게 되어
+    # 플래그가 지워진다. 지연 신고된 과거 거래도 뒤 거래의 판정을 바꾸므로 매번 전체를 다시 본다.
+    # 같은 날 거래는 선후를 알 수 없어 RANGE ... 1 PRECEDING 으로 전날까지만 비교 대상에 넣는다.
+    # DB 파일이 매일 git 에 커밋되므로 값이 달라지는 행만 고쳐 쓴다.
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE transactions
+        SET is_new_high_price = calc.flag
+        FROM (
+            SELECT id,
+                   CASE WHEN cancelled = 0
+                             AND deal_amount > MAX(CASE WHEN cancelled = 0 THEN deal_amount END)
+                                               OVER prior_deals
+                        THEN 1 ELSE 0 END AS flag
+            FROM (
+                SELECT id, deal_amount, exclusive_area,
+                       deal_year * 10000 + deal_month * 100 + deal_day AS deal_date,
+                       CASE WHEN apt_seq IS NOT NULL AND apt_seq != '' THEN 'seq:' || apt_seq
+                            ELSE 'name:' || city_code || '|' || dong_name || '|' || apt_name
+                       END AS complex_key,
+                       CASE WHEN cancel_deal_day IS NULL OR cancel_deal_day = '' THEN 0 ELSE 1
+                       END AS cancelled
+                FROM transactions
+            )
+            WINDOW prior_deals AS (
+                PARTITION BY complex_key, exclusive_area
+                ORDER BY deal_date
+                RANGE BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+            )
+        ) AS calc
+        WHERE transactions.id = calc.id
+        AND transactions.is_new_high_price IS NOT calc.flag
+    ''')
+    return cursor.rowcount
 
 
 def fetch_and_save(city_code, deal_ymd):
+    """한 지역·한 달을 수집해 (저장 건수, 건너뛴 건수) 를 돌려준다. API 오류는 MolitApiError."""
     session = requests.Session()
     retry = Retry(
         total=3, read=3, connect=3,
@@ -183,6 +186,7 @@ def fetch_and_save(city_code, deal_ymd):
 
     page_no = 1
     total_saved = 0
+    total_skipped = 0
 
     while True:
         params = {
@@ -196,100 +200,86 @@ def fetch_and_save(city_code, deal_ymd):
         try:
             response = session.get(API_URL, params=params, timeout=10)
             response.raise_for_status()
-            data = xmltodict.parse(response.text)
-
-            body = data.get('response', {}).get('body', {})
-            if not body:
-                break
-
-            total_count = int(body.get('totalCount', 0))
-            items = body.get('items', {})
-            if not items:
-                break
-
-            item_list = items.get('item', [])
-            if isinstance(item_list, dict):
-                item_list = [item_list]
-
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-
-            for item in item_list:
-                try:
-                    amount_str = item.get('dealAmount') or item.get('거래금액', '0')
-                    amount = int(str(amount_str).replace(',', '').strip())
-
-                    dong = (item.get('umdNm') or item.get('법정동', '')).strip()
-                    apt = (item.get('aptNm') or item.get('아파트', '')).strip()
-                    area = float(item.get('excluUseAr') or item.get('전용면적', 0))
-                    year = int(item.get('dealYear') or item.get('년', 0))
-                    month = int(item.get('dealMonth') or item.get('월', 0))
-                    day = int(item.get('dealDay') or item.get('일', 0))
-                    floor_val = int(item.get('floor') or item.get('층', 0) or 0)
-                    build_yr = int(item.get('buildYear') or item.get('건축년도', 0) or 0)
-                    deal_type = (item.get('dealingGbn') or item.get('거래유형', '')).strip()
-                    cancel_day = str(item.get('cdealDay') or item.get('해제사유발생일') or '').strip()
-
-                    apt_seq = str(item.get('aptSeq') or '').strip() or None
-                    apt_dong_val = str(item.get('aptDong') or '').strip() or None
-                    dong_code = str(item.get('umdCd') or '').strip() or None
-                    jibun = str(item.get('jibun') or '').strip() or None
-                    road_name = str(item.get('roadNm') or '').strip() or None
-                    buyer_type = str(item.get('buyerGbn') or '').strip() or None
-                    seller_type = str(item.get('slerGbn') or '').strip() or None
-                    cancel_type = str(item.get('cdealType') or '').strip() or None
-                    rgst_date = str(item.get('rgstDate') or '').strip() or None
-
-                    is_new_high = check_new_high(cursor, apt_seq, apt, dong, area, amount)
-
-                    cursor.execute('''
-                        INSERT INTO transactions (
-                            city_code, dong_name, dong_code, apt_name, apt_seq, apt_dong,
-                            exclusive_area, deal_amount, deal_year, deal_month, deal_day,
-                            floor, build_year, jibun, road_name,
-                            buyer_type, seller_type, is_direct_deal,
-                            cancel_deal_day, cancel_deal_type, rgst_date,
-                            is_new_high_price
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT DO UPDATE SET
-                            deal_amount = excluded.deal_amount,
-                            apt_seq = COALESCE(excluded.apt_seq, apt_seq),
-                            apt_dong = COALESCE(excluded.apt_dong, apt_dong),
-                            dong_code = COALESCE(excluded.dong_code, dong_code),
-                            jibun = COALESCE(excluded.jibun, jibun),
-                            road_name = COALESCE(excluded.road_name, road_name),
-                            buyer_type = COALESCE(excluded.buyer_type, buyer_type),
-                            seller_type = COALESCE(excluded.seller_type, seller_type),
-                            is_direct_deal = excluded.is_direct_deal,
-                            cancel_deal_day = excluded.cancel_deal_day,
-                            cancel_deal_type = excluded.cancel_deal_type,
-                            rgst_date = COALESCE(excluded.rgst_date, rgst_date),
-                            is_new_high_price = excluded.is_new_high_price
-                    ''', (
-                        city_code, dong, dong_code, apt, apt_seq, apt_dong_val,
-                        area, amount, year, month, day,
-                        floor_val, build_yr, jibun, road_name,
-                        buyer_type, seller_type, deal_type,
-                        cancel_day if cancel_day else None, cancel_type, rgst_date,
-                        is_new_high
-                    ))
-                    if cursor.rowcount > 0:
-                        total_saved += 1
-                except Exception as e:
-                    print(f"  - Skip: {e}")
-
-            conn.commit()
-            conn.close()
-
-            if page_no * 1000 >= total_count:
-                break
-            page_no += 1
-
         except requests.exceptions.RequestException as e:
-            print(f"Error fetching {city_code} (page {page_no}): {e}")
+            raise MolitApiError("HTTP", f"page {page_no}: {mask_service_key(e)}") from None
+
+        item_list, total_count = parse_molit_response(response.text)
+        if not item_list:
             break
 
-    return total_saved
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        for item in item_list:
+            try:
+                amount_str = item.get('dealAmount') or item.get('거래금액', '0')
+                amount = int(str(amount_str).replace(',', '').strip())
+
+                dong = (item.get('umdNm') or item.get('법정동', '')).strip()
+                apt = (item.get('aptNm') or item.get('아파트', '')).strip()
+                area = float(item.get('excluUseAr') or item.get('전용면적', 0))
+                year = int(item.get('dealYear') or item.get('년', 0))
+                month = int(item.get('dealMonth') or item.get('월', 0))
+                day = int(item.get('dealDay') or item.get('일', 0))
+                floor_val = int(item.get('floor') or item.get('층', 0) or 0)
+                build_yr = int(item.get('buildYear') or item.get('건축년도', 0) or 0)
+                deal_type = (item.get('dealingGbn') or item.get('거래유형', '')).strip()
+                cancel_day = str(item.get('cdealDay') or item.get('해제사유발생일') or '').strip()
+
+                apt_seq = str(item.get('aptSeq') or '').strip() or None
+                apt_dong_val = str(item.get('aptDong') or '').strip() or None
+                dong_code = str(item.get('umdCd') or '').strip() or None
+                jibun = str(item.get('jibun') or '').strip() or None
+                road_name = str(item.get('roadNm') or '').strip() or None
+                buyer_type = str(item.get('buyerGbn') or '').strip() or None
+                seller_type = str(item.get('slerGbn') or '').strip() or None
+                cancel_type = str(item.get('cdealType') or '').strip() or None
+                rgst_date = str(item.get('rgstDate') or '').strip() or None
+
+                # is_new_high_price 는 여기서 쓰지 않는다. 수집이 끝난 뒤
+                # recompute_new_high_flags 가 전체를 시간순으로 다시 계산한다.
+                cursor.execute('''
+                    INSERT INTO transactions (
+                        city_code, dong_name, dong_code, apt_name, apt_seq, apt_dong,
+                        exclusive_area, deal_amount, deal_year, deal_month, deal_day,
+                        floor, build_year, jibun, road_name,
+                        buyer_type, seller_type, is_direct_deal,
+                        cancel_deal_day, cancel_deal_type, rgst_date
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT DO UPDATE SET
+                        deal_amount = excluded.deal_amount,
+                        apt_seq = COALESCE(excluded.apt_seq, apt_seq),
+                        apt_dong = COALESCE(excluded.apt_dong, apt_dong),
+                        dong_code = COALESCE(excluded.dong_code, dong_code),
+                        jibun = COALESCE(excluded.jibun, jibun),
+                        road_name = COALESCE(excluded.road_name, road_name),
+                        buyer_type = COALESCE(excluded.buyer_type, buyer_type),
+                        seller_type = COALESCE(excluded.seller_type, seller_type),
+                        is_direct_deal = excluded.is_direct_deal,
+                        cancel_deal_day = excluded.cancel_deal_day,
+                        cancel_deal_type = excluded.cancel_deal_type,
+                        rgst_date = COALESCE(excluded.rgst_date, rgst_date)
+                ''', (
+                    city_code, dong, dong_code, apt, apt_seq, apt_dong_val,
+                    area, amount, year, month, day,
+                    floor_val, build_yr, jibun, road_name,
+                    buyer_type, seller_type, deal_type,
+                    cancel_day if cancel_day else None, cancel_type, rgst_date
+                ))
+                if cursor.rowcount > 0:
+                    total_saved += 1
+            except Exception as e:
+                total_skipped += 1
+                print(f"  - Skip: {e}")
+
+        conn.commit()
+        conn.close()
+
+        if page_no * 1000 >= total_count:
+            break
+        page_no += 1
+
+    return total_saved, total_skipped
 
 
 def recent_months(count):
@@ -306,9 +296,10 @@ def recent_months(count):
 
 
 def run_collector(target_month=None, months=3):
+    """수집을 실행하고 종료 코드를 돌려준다 (0: 전부 성공, 1: 실패 있음)."""
     if not API_KEY:
         print("Error: DATA_API_KEY not found in environment.")
-        return
+        return 1
 
     init_db()
 
@@ -321,38 +312,72 @@ def run_collector(target_month=None, months=3):
 
     print(f"Starting data collection for {', '.join(target_months)}...")
 
+    succeeded = 0
+    failed = 0
+    skipped = 0
+    recompute_failed = False
     grand_total = 0
-    for deal_ymd in target_months:
-        total_new = 0
-        for province, cities in regions.items():
-            print(f"[{deal_ymd}] Processing {province}...")
-            for city_name, code in cities.items():
-                try:
-                    new_records = fetch_and_save(code, deal_ymd)
+    try:
+        for deal_ymd in target_months:
+            total_new = 0
+            for province, cities in regions.items():
+                print(f"[{deal_ymd}] Processing {province}...")
+                for city_name, code in cities.items():
+                    try:
+                        new_records, skipped_rows = fetch_and_save(code, deal_ymd)
+                    except MolitApiError as e:
+                        failed += 1
+                        print(f"  - {city_name} ({code}): FAILED [{e.code}] {e.message}")
+                        continue
+                    except Exception as e:
+                        failed += 1
+                        print(f"  - An error occurred while processing {city_name} ({code}): {mask_service_key(e)}")
+                        continue
+                    succeeded += 1
+                    skipped += skipped_rows
                     total_new += new_records
                     print(f"  - {city_name}: {new_records} records saved/updated.")
-                except Exception as e:
-                    print(f"  - An error occurred while processing {city_name} ({code}): {e}")
-        print(f"[{deal_ymd}] {total_new} records saved/updated.")
-        grand_total += total_new
+            print(f"[{deal_ymd}] {total_new} records saved/updated.")
+            grand_total += total_new
 
-    print(f"Finished. Total {grand_total} records saved/updated in DB.")
+        print(f"Finished. Total {grand_total} records saved/updated in DB.")
 
-    # WAL 모드에서는 변경분이 -wal 파일에 남을 수 있다.
-    # CI가 커밋하는 것은 DB 본체뿐이므로 종료 전에 합쳐준다.
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        conn.close()
-    except Exception as e:
-        print(f"WAL checkpoint failed: {e}")
+        # 일부 지역이 실패했어도 받은 만큼은 커밋되므로 플래그는 항상 다시 맞춘다.
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            changed = recompute_new_high_flags(conn)
+            conn.commit()
+            conn.close()
+            print(f"New-high flags recomputed: {changed} rows changed.")
+        except Exception as e:
+            recompute_failed = True
+            print(f"New-high recompute failed: {e}")
+    finally:
+        # WAL 모드에서는 변경분이 -wal 파일에 남을 수 있다.
+        # CI가 커밋하는 것은 DB 본체뿐이므로 종료 전에 합쳐준다.
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.close()
+        except Exception as e:
+            print(f"WAL checkpoint failed: {e}")
+
+    print(f"Summary: {succeeded} region-months succeeded, {failed} failed, {skipped} rows skipped.")
+
+    # API가 오류에도 HTTP 200 을 주기 때문에 여기서 실패로 끝내지 않으면
+    # 워크플로가 성공으로 보여 수집 중단을 알아채지 못한다.
+    return 1 if failed or recompute_failed else 0
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Collect real estate transaction data.")
     parser.add_argument("--month", type=str, help="The target month in YYYYMM format. Defaults to recent months.")
     parser.add_argument("--months", type=int, default=3,
                         help="How many recent months to re-collect when --month is omitted (default 3).")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    run_collector(target_month=args.month, months=args.months)
+    return run_collector(target_month=args.month, months=args.months)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

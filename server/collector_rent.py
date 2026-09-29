@@ -1,13 +1,15 @@
 import os
+import sys
 import json
 import sqlite3
 import argparse
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import xmltodict
 from datetime import datetime
 from dotenv import load_dotenv
+
+from lib.molit_response import MolitApiError, mask_service_key, parse_molit_response
 
 load_dotenv()
 
@@ -70,6 +72,7 @@ def parse_int(val):
         return 0
 
 def fetch_and_save_rent(city_code, deal_ymd):
+    """한 지역·한 달을 수집해 (저장 건수, 건너뛴 건수) 를 돌려준다. API 오류는 MolitApiError."""
     session = requests.Session()
     retry = Retry(
         total=3, read=3, connect=3,
@@ -82,6 +85,7 @@ def fetch_and_save_rent(city_code, deal_ymd):
 
     page_no = 1
     total_saved = 0
+    total_skipped = 0
 
     while True:
         params = {
@@ -95,91 +99,80 @@ def fetch_and_save_rent(city_code, deal_ymd):
         try:
             response = session.get(API_URL, params=params, timeout=10)
             response.raise_for_status()
-            data = xmltodict.parse(response.text)
-
-            body = data.get('response', {}).get('body', {})
-            if not body:
-                break
-
-            total_count = int(body.get('totalCount', 0))
-            items = body.get('items', {})
-            if not items:
-                break
-
-            item_list = items.get('item', [])
-            if isinstance(item_list, dict):
-                item_list = [item_list]
-
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-
-            for item in item_list:
-                try:
-                    deposit = parse_int(item.get('deposit') or item.get('보증금액'))
-                    monthly_rent = parse_int(item.get('monthlyRent') or item.get('월세금액'))
-
-                    dong = (item.get('umdNm') or item.get('법정동', '')).strip()
-                    apt = (item.get('aptNm') or item.get('아파트', '')).strip()
-                    area = float(item.get('excluUseAr') or item.get('전용면적', 0))
-                    year = parse_int(item.get('dealYear') or item.get('년'))
-                    month = parse_int(item.get('dealMonth') or item.get('월'))
-                    day = parse_int(item.get('dealDay') or item.get('일'))
-                    floor_val = parse_int(item.get('floor') or item.get('층'))
-                    build_yr = parse_int(item.get('buildYear') or item.get('건축년도'))
-
-                    def text_of(*keys):
-                        for key in keys:
-                            value = item.get(key)
-                            if value:
-                                return str(value).strip()
-                        return None
-
-                    # 이미 저장된 거래도 계약구분 등 신규 컬럼을 채워야 하므로 UPSERT를 사용한다.
-                    cursor.execute('''
-                        INSERT INTO rent_transactions (
-                            city_code, dong_name, apt_name, exclusive_area,
-                            deal_year, deal_month, deal_day, deposit, monthly_rent, floor, build_year,
-                            apt_seq, jibun, road_name, contract_type, use_rr_right, contract_term,
-                            pre_deposit, pre_monthly_rent
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(city_code, apt_name, dong_name, deal_year, deal_month, deal_day,
-                                    deposit, monthly_rent, floor)
-                        DO UPDATE SET
-                            apt_seq = COALESCE(excluded.apt_seq, apt_seq),
-                            jibun = COALESCE(excluded.jibun, jibun),
-                            road_name = COALESCE(excluded.road_name, road_name),
-                            contract_type = COALESCE(excluded.contract_type, contract_type),
-                            use_rr_right = COALESCE(excluded.use_rr_right, use_rr_right),
-                            contract_term = COALESCE(excluded.contract_term, contract_term),
-                            pre_deposit = COALESCE(excluded.pre_deposit, pre_deposit),
-                            pre_monthly_rent = COALESCE(excluded.pre_monthly_rent, pre_monthly_rent)
-                    ''', (
-                        city_code, dong, apt, area, year, month, day, deposit, monthly_rent, floor_val, build_yr,
-                        text_of('aptSeq'), text_of('jibun', '지번'), text_of('roadnm', '도로명'),
-                        text_of('contractType', '계약구분'), text_of('useRRRight', '갱신요구권사용'),
-                        text_of('contractTerm', '계약기간'),
-                        parse_int(item.get('preDeposit') or item.get('종전계약보증금')),
-                        parse_int(item.get('preMonthlyRent') or item.get('종전계약월세')),
-                    ))
-
-                    if cursor.rowcount > 0:
-                        total_saved += 1
-                        
-                except Exception as e:
-                    print(f"  - Skip: {e}")
-
-            conn.commit()
-            conn.close()
-
-            if page_no * 1000 >= total_count:
-                break
-            page_no += 1
-
         except requests.exceptions.RequestException as e:
-            print(f"Error fetching {city_code} (page {page_no}): {e}")
+            raise MolitApiError("HTTP", f"page {page_no}: {mask_service_key(e)}") from None
+
+        item_list, total_count = parse_molit_response(response.text)
+        if not item_list:
             break
 
-    return total_saved
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        for item in item_list:
+            try:
+                deposit = parse_int(item.get('deposit') or item.get('보증금액'))
+                monthly_rent = parse_int(item.get('monthlyRent') or item.get('월세금액'))
+
+                dong = (item.get('umdNm') or item.get('법정동', '')).strip()
+                apt = (item.get('aptNm') or item.get('아파트', '')).strip()
+                area = float(item.get('excluUseAr') or item.get('전용면적', 0))
+                year = parse_int(item.get('dealYear') or item.get('년'))
+                month = parse_int(item.get('dealMonth') or item.get('월'))
+                day = parse_int(item.get('dealDay') or item.get('일'))
+                floor_val = parse_int(item.get('floor') or item.get('층'))
+                build_yr = parse_int(item.get('buildYear') or item.get('건축년도'))
+
+                def text_of(*keys):
+                    for key in keys:
+                        value = item.get(key)
+                        if value:
+                            return str(value).strip()
+                    return None
+
+                # 이미 저장된 거래도 계약구분 등 신규 컬럼을 채워야 하므로 UPSERT를 사용한다.
+                cursor.execute('''
+                    INSERT INTO rent_transactions (
+                        city_code, dong_name, apt_name, exclusive_area,
+                        deal_year, deal_month, deal_day, deposit, monthly_rent, floor, build_year,
+                        apt_seq, jibun, road_name, contract_type, use_rr_right, contract_term,
+                        pre_deposit, pre_monthly_rent
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(city_code, apt_name, dong_name, deal_year, deal_month, deal_day,
+                                deposit, monthly_rent, floor)
+                    DO UPDATE SET
+                        apt_seq = COALESCE(excluded.apt_seq, apt_seq),
+                        jibun = COALESCE(excluded.jibun, jibun),
+                        road_name = COALESCE(excluded.road_name, road_name),
+                        contract_type = COALESCE(excluded.contract_type, contract_type),
+                        use_rr_right = COALESCE(excluded.use_rr_right, use_rr_right),
+                        contract_term = COALESCE(excluded.contract_term, contract_term),
+                        pre_deposit = COALESCE(excluded.pre_deposit, pre_deposit),
+                        pre_monthly_rent = COALESCE(excluded.pre_monthly_rent, pre_monthly_rent)
+                ''', (
+                    city_code, dong, apt, area, year, month, day, deposit, monthly_rent, floor_val, build_yr,
+                    text_of('aptSeq'), text_of('jibun', '지번'), text_of('roadnm', '도로명'),
+                    text_of('contractType', '계약구분'), text_of('useRRRight', '갱신요구권사용'),
+                    text_of('contractTerm', '계약기간'),
+                    parse_int(item.get('preDeposit') or item.get('종전계약보증금')),
+                    parse_int(item.get('preMonthlyRent') or item.get('종전계약월세')),
+                ))
+
+                if cursor.rowcount > 0:
+                    total_saved += 1
+
+            except Exception as e:
+                total_skipped += 1
+                print(f"  - Skip: {e}")
+
+        conn.commit()
+        conn.close()
+
+        if page_no * 1000 >= total_count:
+            break
+        page_no += 1
+
+    return total_saved, total_skipped
 
 
 def recent_months(count):
@@ -196,9 +189,10 @@ def recent_months(count):
 
 
 def run_collector(target_month=None, months=3):
+    """수집을 실행하고 종료 코드를 돌려준다 (0: 전부 성공, 1: 실패 있음)."""
     if not API_KEY:
         print("Error: DATA_API_KEY not found in environment.")
-        return
+        return 1
 
     ensure_table()
 
@@ -210,38 +204,60 @@ def run_collector(target_month=None, months=3):
 
     print(f"Starting Rent data collection for {', '.join(target_months)}...")
 
+    succeeded = 0
+    failed = 0
+    skipped = 0
     grand_total = 0
-    for deal_ymd in target_months:
-        total_new = 0
-        for province, cities in regions.items():
-            print(f"[{deal_ymd}] Processing {province}...")
-            for city_name, code in cities.items():
-                try:
-                    new_records = fetch_and_save_rent(code, deal_ymd)
+    try:
+        for deal_ymd in target_months:
+            total_new = 0
+            for province, cities in regions.items():
+                print(f"[{deal_ymd}] Processing {province}...")
+                for city_name, code in cities.items():
+                    try:
+                        new_records, skipped_rows = fetch_and_save_rent(code, deal_ymd)
+                    except MolitApiError as e:
+                        failed += 1
+                        print(f"  - {city_name} ({code}): FAILED [{e.code}] {e.message}")
+                        continue
+                    except Exception as e:
+                        failed += 1
+                        print(f"  - An error occurred while processing {city_name} ({code}): {mask_service_key(e)}")
+                        continue
+                    succeeded += 1
+                    skipped += skipped_rows
                     total_new += new_records
                     print(f"  - {city_name}: {new_records} rent records saved/updated.")
-                except Exception as e:
-                    print(f"  - An error occurred while processing {city_name} ({code}): {e}")
-        print(f"[{deal_ymd}] {total_new} rent records saved/updated.")
-        grand_total += total_new
+            print(f"[{deal_ymd}] {total_new} rent records saved/updated.")
+            grand_total += total_new
 
-    print(f"Finished. Total {grand_total} rent records saved/updated in DB.")
+        print(f"Finished. Total {grand_total} rent records saved/updated in DB.")
+    finally:
+        # WAL 모드에서는 변경분이 -wal 파일에 남을 수 있다.
+        # CI가 커밋하는 것은 DB 본체뿐이므로 종료 전에 합쳐준다.
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.close()
+        except Exception as e:
+            print(f"WAL checkpoint failed: {e}")
 
-    # WAL 모드에서는 변경분이 -wal 파일에 남을 수 있다.
-    # CI가 커밋하는 것은 DB 본체뿐이므로 종료 전에 합쳐준다.
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        conn.close()
-    except Exception as e:
-        print(f"WAL checkpoint failed: {e}")
+    print(f"Summary: {succeeded} region-months succeeded, {failed} failed, {skipped} rows skipped.")
+
+    # API가 오류에도 HTTP 200 을 주기 때문에 여기서 실패로 끝내지 않으면
+    # 워크플로가 성공으로 보여 수집 중단을 알아채지 못한다.
+    return 1 if failed else 0
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Collect rent transaction data.")
     parser.add_argument("--month", type=str, help="The target month in YYYYMM format. Defaults to recent months.")
     parser.add_argument("--months", type=int, default=3,
                         help="How many recent months to re-collect when --month is omitted (default 3).")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    run_collector(target_month=args.month, months=args.months)
+    return run_collector(target_month=args.month, months=args.months)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
