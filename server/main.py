@@ -12,14 +12,22 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from logging.handlers import RotatingFileHandler
 from lib.kakao_api import (get_kakao_commute, get_precise_coordinates,
                            is_realtime_routing_available, estimate_commute)
 
 # --- Logging Setup ---
+# 장기간 띄워 두는 서버라 로그 파일이 무한히 커지지 않도록 5MB 단위로 회전하고 백업은 3개만 남긴다.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler(os.path.join(os.path.dirname(__file__), "server.log"), encoding="utf-8")]
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler(
+            os.path.join(os.path.dirname(__file__), "server.log"),
+            maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8",
+        ),
+    ],
 )
 logger = logging.getLogger(__name__)
 
@@ -49,21 +57,41 @@ def _check_optimize_rate_limit(client_key: str) -> bool:
                     _optimize_rate.pop(key, None)
         return True
 
+# Render 같은 프록시 뒤에서는 소켓 주소가 프록시 주소라 모든 사용자가 한도를 같이 쓴다.
+# 앞단에 있는 신뢰할 수 있는 프록시 수를 알려주면 X-Forwarded-For에서 실제 클라이언트를 고른다.
+TRUSTED_PROXY_HOPS = max(0, int(os.getenv("TRUSTED_PROXY_HOPS", "0")))
+
+def _rate_limit_client_key(http_request: Request) -> str:
+    """레이트리밋에 쓸 클라이언트 식별자.
+
+    X-Forwarded-For의 왼쪽 값은 클라이언트가 마음대로 채워 보낼 수 있으므로,
+    신뢰하는 프록시가 덧붙인 오른쪽에서 N번째 값만 쓴다.
+    """
+    socket_host = http_request.client.host if http_request.client else "unknown"
+    if TRUSTED_PROXY_HOPS <= 0:
+        return socket_host
+    # 헤더가 여러 줄로 오면 이어 붙인 하나의 목록과 같다. 첫 줄만 읽으면 위조한 줄이 선택될 수 있다.
+    forwarded = ",".join(http_request.headers.getlist("x-forwarded-for"))
+    hops = [hop.strip() for hop in forwarded.split(",")]
+    if len(hops) < TRUSTED_PROXY_HOPS or not hops[-TRUSTED_PROXY_HOPS]:
+        return socket_host
+    return hops[-TRUSTED_PROXY_HOPS]
+
 # --- CORS Configuration ---
 # GitHub Pages와 로컬 개발 환경 모두에서 안정적으로 작동하도록 설정
+# (Origin 헤더에는 경로가 붙지 않으므로 scheme://host[:port] 형태만 등록한다)
 origins = [
     "http://localhost:5173",      # 로컬 Vite 환경
     "http://127.0.0.1:5173",      # 로컬 Vite 환경 (IP)
     "https://hee882.github.io",   # 배포된 프론트엔드 환경
-    "https://hee882.github.io/search-house",
     "https://search-house.onrender.com"
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, 
+    allow_origins=origins,
     allow_credentials=True, # 명시적인 origin 목록을 사용할 경우 credential 허용 가능
-    allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
@@ -103,6 +131,9 @@ class OptimizeRequest(BaseModel):
 # --- Paths ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "server", "data", "search_house.db")
+# 좌표·통근 캐시는 실거래 DB와 다른 파일에 쓴다. 실거래 DB는 CI가 매일 자동 커밋하는 추적 파일이라
+# 서버를 띄우거나 테스트만 돌려도 내용이 바뀌면 곧바로 충돌 원인이 된다.
+CACHE_DB_PATH = os.getenv("CACHE_DB_PATH") or os.path.join(BASE_DIR, "server", "data", "runtime_cache.db")
 STATIONS_PATH = os.path.join(BASE_DIR, "server", "data", "stations.json")
 DONG_COORDS_PATH = os.path.join(BASE_DIR, "server", "data", "dong_coordinates.json")
 FRONTEND_DIST = os.path.join(BASE_DIR, "client", "dist")
@@ -251,6 +282,141 @@ def _filter_complexes_by_iqr(raw_rows, min_samples=3):
 
     return result
 
+# 실거래 데이터는 하루 한 번만 바뀌는데 요청마다 최근 12개월 전체를 다시 집계하면
+# (실측 전월세 약 0.2초, 매매 약 0.08초 + IQR 처리) 그 시간이 그대로 응답 지연이 된다.
+OPTIMIZE_AGGREGATE_TTL_SECONDS = max(0, int(os.getenv("OPTIMIZE_AGGREGATE_TTL_SECONDS", "600")))
+# 항목 하나가 1.6~2.5MB라 상한이 곧 메모리 상한이다. Render 인스턴스(512MB)에서
+# 다른 용도의 메모리를 밀어내지 않도록 기본값을 16개(최대 약 40MB)로 둔다.
+OPTIMIZE_AGGREGATE_MAX_ENTRIES = max(1, int(os.getenv("OPTIMIZE_AGGREGATE_MAX_ENTRIES", "16")))
+_aggregate_cache: dict[tuple, tuple[float, tuple]] = {}
+_aggregate_cache_lock = threading.Lock()
+
+
+def _query_complex_rows(resident_type, min_area, max_area, min_build_year, min_month_index):
+    """조건에 맞는 거래를 단지별 GROUP_CONCAT으로 묶어 조회한다 (IQR 처리 전 원본)."""
+    # 단지별 전체 거래를 GROUP_CONCAT으로 가져와 Python에서 IQR 아웃라이어 제거
+    # 공공임대는 단지명으로 걸러낸다. 보증금 하한은 전세에만 적용한다.
+    # (예전에는 보증금 3000만 하한을 월세에도 걸어 '보증금 1000/월 70' 같은
+    #  일반 월세 거래 2만여 건, 전체의 13%가 통째로 빠졌다)
+    RENTAL_FILTER = """
+        AND (
+            (monthly_rent = 0 AND deposit >= 3000)
+            OR (monthly_rent >= 10)
+        )
+        AND apt_name NOT LIKE '%임대%'
+        AND apt_name NOT LIKE '%행복주택%'
+        AND apt_name NOT LIKE '%LH%'
+        AND apt_name NOT LIKE '%SH%'
+        AND apt_name NOT LIKE '%공공임대%'
+        AND apt_name NOT LIKE '%국민임대%'
+        AND apt_name NOT LIKE '%영구임대%'
+        AND apt_name NOT LIKE '%장기전세%'
+        AND apt_name NOT LIKE '%시프트%'
+        AND apt_name NOT LIKE '%뉴스테이%'
+        AND apt_name NOT LIKE '%기업형임대%'
+        AND apt_name NOT LIKE '%도시형%'
+        AND apt_name NOT LIKE '%오피스텔%'
+    """
+    area_filter = "AND exclusive_area >= ? AND exclusive_area <= ?"
+    # 갱신계약은 2년 전 보증금에 상한이 걸린 값이라 지금 들어갈 수 있는 시세보다 낮다.
+    # 실측 기준 같은 단지·면적대에서 신규계약 대비 중앙값 -9.2% 수준이어서 제외한다.
+    contract_filter = " AND (contract_type IS NULL OR contract_type != '갱신')" if RENT_HAS_CONTRACT_TYPE else ""
+    year_filter = " AND build_year >= ?" if min_build_year > 0 else ""
+
+    # 전세/월세를 직접 고른 경우 해당 유형만 집계한다.
+    # (선택하지 않으면 거래가 많은 유형이 대표 시세가 되어, 전세를 찾는 사용자에게
+    #  월세 단지가 섞여 나왔다)
+    if resident_type == 'jeonse':
+        rent_type_filter = " AND monthly_rent = 0"
+    elif resident_type == 'wolse':
+        rent_type_filter = " AND monthly_rent > 0"
+    else:
+        rent_type_filter = ""
+
+    if resident_type == 'buy':
+        # 매매: 실거래가(deal_amount, 만원)를 보증금 자리에 넣어 동일한 집계 파이프라인을 사용한다.
+        # 해제된 거래(cancel_deal_day)는 시세로 볼 수 없으므로 제외한다.
+        raw_query = f"""
+            SELECT apt_name, dong_name, city_code,
+                   GROUP_CONCAT(deal_amount || ':0:' || exclusive_area) as price_pairs,
+                   build_year
+            FROM transactions
+            WHERE (deal_year * 12 + deal_month) >= ?
+            AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
+            AND deal_amount > 0
+            {area_filter}
+            {year_filter}
+            GROUP BY apt_name, dong_name, city_code
+            HAVING COUNT(*) >= 3
+        """
+    else:
+        raw_query = f"""
+            SELECT apt_name, dong_name, city_code,
+                   GROUP_CONCAT(deposit || ':' || monthly_rent || ':' || exclusive_area) as price_pairs,
+                   build_year
+            FROM rent_transactions
+            WHERE (deal_year * 12 + deal_month) >= ?
+            {RENTAL_FILTER}
+            {contract_filter}
+            {rent_type_filter}
+            {area_filter}
+            {year_filter}
+            GROUP BY apt_name, dong_name, city_code
+            HAVING COUNT(*) >= 3
+        """
+    params = [min_month_index, min_area, max_area]
+    if min_build_year > 0:
+        params.append(min_build_year)
+
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        return conn.execute(raw_query, params).fetchall()
+    finally:
+        conn.close()
+
+
+def get_complex_aggregates(resident_type, min_area, max_area, min_build_year, min_month_index):
+    """IQR 필터까지 끝낸 단지별 대표 시세를 반환한다 (조건별 TTL 캐시).
+
+    반환값은 여러 요청이 함께 쓰는 캐시 항목이라, 호출자가 바꿀 수 없도록 튜플로 돌려준다.
+    """
+    # 테스트가 DB_PATH를 바꿔 끼우고 계약구분 컬럼 유무에 따라 쿼리가 달라지므로 둘 다 키에 넣는다.
+    key = (DB_PATH, resident_type, min_area, max_area, min_build_year, min_month_index,
+           RENT_HAS_CONTRACT_TYPE)
+    ttl = OPTIMIZE_AGGREGATE_TTL_SECONDS
+    with _aggregate_cache_lock:
+        cached = _aggregate_cache.get(key)
+        if cached and time.monotonic() - cached[0] < ttl:
+            return cached[1]
+
+    # 조회와 IQR 처리는 락 밖에서 한다. 락을 쥔 채 집계하면 조건이 다른 요청까지 줄을 서게 된다.
+    raw_rows = _query_complex_rows(resident_type, min_area, max_area, min_build_year, min_month_index)
+
+    # IQR 기반 아웃라이어 제거 후 클린 평균 산출
+    complexes = _filter_complexes_by_iqr(raw_rows, min_samples=3)
+
+    # 결과 없으면 IQR min_samples 완화해서 재시도 (거래량이 적은 지역 대응)
+    if not complexes:
+        logger.info("IQR 필터 후 결과 없음 → min_samples=2로 완화 재시도")
+        complexes = _filter_complexes_by_iqr(raw_rows, min_samples=2)
+    complexes = tuple(complexes)
+
+    if ttl <= 0:
+        return complexes
+
+    with _aggregate_cache_lock:
+        now = time.monotonic()
+        _aggregate_cache.pop(key, None)  # 다시 넣어 삽입 순서상 가장 최신 항목이 되게 한다
+        _aggregate_cache[key] = (now, complexes)
+        if len(_aggregate_cache) > OPTIMIZE_AGGREGATE_MAX_ENTRIES:
+            # 면적 조건을 조금씩 바꾼 요청이 이어져도 메모리가 계속 늘지 않도록
+            # 만료된 항목부터, 그래도 넘치면 오래된 순으로 버린다.
+            for stale_key in [k for k, (stamp, _) in _aggregate_cache.items() if now - stamp >= ttl]:
+                _aggregate_cache.pop(stale_key, None)
+            while len(_aggregate_cache) > OPTIMIZE_AGGREGATE_MAX_ENTRIES:
+                _aggregate_cache.pop(next(iter(_aggregate_cache)))
+    return complexes
+
 MAX_RESULTS = 5
 MAX_RESULTS_PER_DONG = 2
 # 거리 기준으로 훑을 후보 수와, 그중 실제 경로 API로 정밀 분석할 수.
@@ -392,8 +558,10 @@ def calculate_hidden_life_cost(salary, commute_minutes):
     elif commute_minutes >= 45: multiplier = 1.15
     return round((base_time_value * multiplier) / 10000)
 
+# 통계 API는 동기 sqlite3를 호출하므로 async def로 두면 이벤트 루프가 막힌다.
+# def로 선언해 FastAPI가 스레드풀에서 실행하게 한다.
 @app.get("/api/stats/transactions")
-async def get_transaction_stats(
+def get_transaction_stats(
     city_code: str = Query(..., pattern=r"^\d{5}$"),
     year: Optional[int] = Query(None, ge=1900, le=2100),
     month: Optional[int] = Query(None, ge=1, le=12),
@@ -416,10 +584,12 @@ async def get_transaction_stats(
             ''', (city_code, year, month))
             total = cursor.fetchone()[0]
 
+            # 해제된 거래는 total·daily에서 빠지므로 신고가 건수도 같은 기준으로 센다
             cursor.execute('''
                 SELECT COUNT(*) FROM transactions
                 WHERE city_code = ? AND deal_year = ? AND deal_month = ?
                 AND is_new_high_price = 1
+                AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
             ''', (city_code, year, month))
             new_high_count = cursor.fetchone()[0]
 
@@ -474,7 +644,7 @@ async def get_transaction_stats(
 
 
 @app.get("/api/stats/new-highs")
-async def get_new_highs(
+def get_new_highs(
     city_code: str = Query(..., pattern=r"^\d{5}$"),
     limit: int = Query(20, ge=1, le=100),
 ):
@@ -484,14 +654,32 @@ async def get_new_highs(
         conn = sqlite3.connect(DB_PATH)
         try:
             cursor = conn.cursor()
+            # 이전 최고가는 거래일이 더 이른 거래에서 찾는다. id는 수집 순서일 뿐이라
+            # 과거 월을 재수집하면 더 이른 거래에 나중 id가 붙어 값이 틀어진다.
+            # 같은 단지인지는 수집기가 신고가를 판정할 때(recompute_new_high_flags)와 같은 키로 본다.
+            # apt_seq가 있으면 apt_seq, 없으면 city_code + dong_name + apt_name이다. 기준이 다르면
+            # 단지명 표기가 바뀐 단지에서 신고가로 표시된 거래의 직전 최고가가 비어 버린다.
+            # 두 경우를 OR로 묶지 않고 나눠 쓴 것은 각각 idx_new_high와 UNIQUE 인덱스를 타게 하기 위해서다.
             cursor.execute('''
                 SELECT t.apt_name, t.dong_name, t.exclusive_area, t.deal_amount,
                        t.deal_year, t.deal_month, t.deal_day, t.floor, t.build_year,
-                       (SELECT MAX(t2.deal_amount) FROM transactions t2
-                        WHERE t2.apt_name = t.apt_name AND t2.dong_name = t.dong_name
-                        AND t2.exclusive_area = t.exclusive_area
-                        AND (t2.cancel_deal_day IS NULL OR t2.cancel_deal_day = '')
-                        AND t2.id < t.id) as prev_high
+                       CASE WHEN t.apt_seq IS NOT NULL AND t.apt_seq != '' THEN
+                           (SELECT MAX(t2.deal_amount) FROM transactions t2
+                            WHERE t2.apt_seq = t.apt_seq
+                            AND t2.exclusive_area = t.exclusive_area
+                            AND (t2.cancel_deal_day IS NULL OR t2.cancel_deal_day = '')
+                            AND (t2.deal_year * 10000 + t2.deal_month * 100 + t2.deal_day)
+                                < (t.deal_year * 10000 + t.deal_month * 100 + t.deal_day))
+                       ELSE
+                           (SELECT MAX(t3.deal_amount) FROM transactions t3
+                            WHERE t3.city_code = t.city_code
+                            AND t3.dong_name = t.dong_name AND t3.apt_name = t.apt_name
+                            AND (t3.apt_seq IS NULL OR t3.apt_seq = '')
+                            AND t3.exclusive_area = t.exclusive_area
+                            AND (t3.cancel_deal_day IS NULL OR t3.cancel_deal_day = '')
+                            AND (t3.deal_year * 10000 + t3.deal_month * 100 + t3.deal_day)
+                                < (t.deal_year * 10000 + t.deal_month * 100 + t.deal_day))
+                       END as prev_high
                 FROM transactions t
                 WHERE t.city_code = ? AND t.is_new_high_price = 1
                 AND (t.cancel_deal_day IS NULL OR t.cancel_deal_day = '')
@@ -534,8 +722,7 @@ async def get_stations():
 
 @app.post("/api/optimize")
 def optimize_location(request: OptimizeRequest, http_request: Request):
-    client_host = http_request.client.host if http_request.client else "unknown"
-    if not _check_optimize_rate_limit(client_host):
+    if not _check_optimize_rate_limit(_rate_limit_client_key(http_request)):
         raise HTTPException(status_code=429, detail="Too many optimization requests. Please retry later.")
     try:
         # 1. 날짜 및 시간 설정 (차주 월요일 기준)
@@ -559,99 +746,14 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
         if request.max_building_age > 0:
             min_build_year = datetime.now().year - request.max_building_age
 
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # 단지별 전체 거래를 GROUP_CONCAT으로 가져와 Python에서 IQR 아웃라이어 제거
-        # 공공임대는 단지명으로 걸러낸다. 보증금 하한은 전세에만 적용한다.
-        # (예전에는 보증금 3000만 하한을 월세에도 걸어 '보증금 1000/월 70' 같은
-        #  일반 월세 거래 2만여 건, 전체의 13%가 통째로 빠졌다)
-        RENTAL_FILTER = """
-            AND (
-                (monthly_rent = 0 AND deposit >= 3000)
-                OR (monthly_rent >= 10)
-            )
-            AND apt_name NOT LIKE '%임대%'
-            AND apt_name NOT LIKE '%행복주택%'
-            AND apt_name NOT LIKE '%LH%'
-            AND apt_name NOT LIKE '%SH%'
-            AND apt_name NOT LIKE '%공공임대%'
-            AND apt_name NOT LIKE '%국민임대%'
-            AND apt_name NOT LIKE '%영구임대%'
-            AND apt_name NOT LIKE '%장기전세%'
-            AND apt_name NOT LIKE '%시프트%'
-            AND apt_name NOT LIKE '%뉴스테이%'
-            AND apt_name NOT LIKE '%기업형임대%'
-            AND apt_name NOT LIKE '%도시형%'
-            AND apt_name NOT LIKE '%오피스텔%'
-        """
-        area_filter = "AND exclusive_area >= ? AND exclusive_area <= ?"
-        # 갱신계약은 2년 전 보증금에 상한이 걸린 값이라 지금 들어갈 수 있는 시세보다 낮다.
-        # 실측 기준 같은 단지·면적대에서 신규계약 대비 중앙값 -9.2% 수준이어서 제외한다.
-        contract_filter = " AND (contract_type IS NULL OR contract_type != '갱신')" if RENT_HAS_CONTRACT_TYPE else ""
-        year_filter = " AND build_year >= ?" if min_build_year > 0 else ""
-
         # 최근 12개월 거래만 집계 (연/월을 개월 수로 환산해 비교)
         min_month_index = (now.year * 12 + now.month) - 12
 
-        # 전세/월세를 직접 고른 경우 해당 유형만 집계한다.
-        # (선택하지 않으면 거래가 많은 유형이 대표 시세가 되어, 전세를 찾는 사용자에게
-        #  월세 단지가 섞여 나왔다)
-        if request.resident_type == 'jeonse':
-            rent_type_filter = " AND monthly_rent = 0"
-        elif request.resident_type == 'wolse':
-            rent_type_filter = " AND monthly_rent > 0"
-        else:
-            rent_type_filter = ""
-
-        if request.resident_type == 'buy':
-            # 매매: 실거래가(deal_amount, 만원)를 보증금 자리에 넣어 동일한 집계 파이프라인을 사용한다.
-            # 해제된 거래(cancel_deal_day)는 시세로 볼 수 없으므로 제외한다.
-            raw_query = f"""
-                SELECT apt_name, dong_name, city_code,
-                       GROUP_CONCAT(deal_amount || ':0:' || exclusive_area) as price_pairs,
-                       build_year
-                FROM transactions
-                WHERE (deal_year * 12 + deal_month) >= ?
-                AND (cancel_deal_day IS NULL OR cancel_deal_day = '')
-                AND deal_amount > 0
-                {area_filter}
-                {year_filter}
-                GROUP BY apt_name, dong_name, city_code
-                HAVING COUNT(*) >= 3
-            """
-        else:
-            raw_query = f"""
-                SELECT apt_name, dong_name, city_code,
-                       GROUP_CONCAT(deposit || ':' || monthly_rent || ':' || exclusive_area) as price_pairs,
-                       build_year
-                FROM rent_transactions
-                WHERE (deal_year * 12 + deal_month) >= ?
-                {RENTAL_FILTER}
-                {contract_filter}
-                {rent_type_filter}
-                {area_filter}
-                {year_filter}
-                GROUP BY apt_name, dong_name, city_code
-                HAVING COUNT(*) >= 3
-            """
-        params = [min_month_index, request.min_area, request.max_area]
-        if min_build_year > 0:
-            params.append(min_build_year)
-
-        try:
-            cursor.execute(raw_query, params)
-            raw_rows = cursor.fetchall()
-        finally:
-            conn.close()
-
-        # IQR 기반 아웃라이어 제거 후 클린 평균 산출
-        all_complexes = _filter_complexes_by_iqr(raw_rows, min_samples=3)
-
-        # 결과 없으면 IQR min_samples 완화해서 재시도 (거래량이 적은 지역 대응)
-        if not all_complexes:
-            logger.info("IQR 필터 후 결과 없음 → min_samples=2로 완화 재시도")
-            all_complexes = _filter_complexes_by_iqr(raw_rows, min_samples=2)
+        # 집계와 IQR 처리는 조건별로 캐시된 결과를 쓴다 (읽기 전용 튜플)
+        all_complexes = get_complex_aggregates(
+            request.resident_type, request.min_area, request.max_area,
+            min_build_year, min_month_index,
+        )
 
         # 3. 직선거리 기준 후보군 추출 (Fast Scan, 상위 50개 정밀 분석)
         # 커플 모드에서 두 직장의 중간점을 쓰면 중간 지점이 강·산이라 실제로는 양쪽 모두
@@ -739,16 +841,19 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
         # 3-2. 정밀 분석: 좁혀진 후보만 실제 좌표·경로 API로 계산한다.
         def measure_commute(spot):
             """한 후보의 정밀 좌표와 출퇴근 소요시간을 구한다 (후보 간 독립적이라 병렬 실행)."""
-            precise_lat, precise_lng = get_precise_coordinates(DB_PATH, spot['name'], spot['dong'], spot['city_code'])
-            if precise_lat and precise_lng:
+            precise_lat, precise_lng = get_precise_coordinates(CACHE_DB_PATH, spot['name'], spot['dong'], spot['city_code'])
+            # 단지 좌표를 못 얻으면 법정동·구 중심 좌표가 그대로 남는다.
+            # 클라이언트가 자체 좌표 보정을 할지 판단할 수 있게 구분해 둔다.
+            spot['coord_precise'] = bool(precise_lat and precise_lng)
+            if spot['coord_precise']:
                 spot['lat'], spot['lng'] = precise_lat, precise_lng
 
             times = []
             for (w_lat, w_lng), profile in zip(workplaces, profiles):
                 # 출근: 08:00 도착 시뮬레이션 / 퇴근: 18:00 정시 출발
-                morning, _ = get_kakao_commute(DB_PATH, spot['lat'], spot['lng'], w_lat, w_lng,
+                morning, _ = get_kakao_commute(CACHE_DB_PATH, spot['lat'], spot['lng'], w_lat, w_lng,
                                                profile.transport, goal_arrive_time="0800")
-                evening, _ = get_kakao_commute(DB_PATH, w_lat, w_lng, spot['lat'], spot['lng'],
+                evening, _ = get_kakao_commute(CACHE_DB_PATH, w_lat, w_lng, spot['lat'], spot['lng'],
                                                profile.transport, departure_time=time_evening)
                 times.append((morning, evening))
             return spot, times
@@ -783,6 +888,7 @@ def optimize_location(request: OptimizeRequest, http_request: Request):
                 price_label = "전세" if spot['avg_rent'] == 0 else "월세"
             results.append({
                 "name": spot['name'], "lat": spot['lat'], "lng": spot['lng'],
+                "coord_precise": spot['coord_precise'],
                 "nearest_stations": nearest_stations,
                 "dong": spot['dong'],
                 "total_cost": total_opp_cost,

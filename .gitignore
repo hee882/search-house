@@ -21,6 +21,11 @@ venv/
 *.db-wal
 *.db-shm
 
+# 좌표·통근 런타임 캐시 (실거래 DB와 분리된 로컬 전용 파일)
+runtime_cache.db
+runtime_cache.db-wal
+runtime_cache.db-shm
+
 # Logs
 npm-debug.log*
 yarn-debug.log*

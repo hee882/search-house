@@ -2,8 +2,5 @@ fastapi
 uvicorn
 python-dotenv
 requests
-pandas
-beautifulsoup4
-playwright
 xmltodict
 pydantic

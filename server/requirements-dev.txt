@@ -1,0 +1,6 @@
+# 개발·테스트 전용 패키지 (운영 서버에는 requirements.txt 만 설치한다)
+-r requirements.txt
+# fastapi.testclient.TestClient 가 요구한다
+httpx
+# 일회성 스크립트 build_stations.py 만 사용한다
+pandas

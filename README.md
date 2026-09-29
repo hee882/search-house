@@ -76,6 +76,14 @@ OPTIMIZE_RATE_MAX_REQUESTS=12
 OPTIMIZE_RATE_WINDOW_SECONDS=60
 # 선택: 통근 캐시 만료(초, 기본 900)
 COMMUTE_CACHE_TTL_SECONDS=900
+# 선택: 단지 시세 집계 캐시 유지 시간(초, 기본 600, 0이면 캐시를 쓰지 않음)
+OPTIMIZE_AGGREGATE_TTL_SECONDS=600
+# 선택: 단지 시세 집계 캐시 항목 수 상한 (기본 16, 최소 1)
+OPTIMIZE_AGGREGATE_MAX_ENTRIES=16
+# 선택: 앞단의 신뢰할 수 있는 프록시 수 (기본 0 = 소켓 주소로 요청 제한)
+TRUSTED_PROXY_HOPS=0
+# 선택: 좌표·통근 캐시 DB 경로 (기본 server/data/runtime_cache.db)
+# CACHE_DB_PATH=/var/data/runtime_cache.db
 ```
 
 `/api/optimize`는 IP별 요청 제한을 적용하며 초과 시 `429`를 반환합니다. 대중교통 모드는 자동차 경로 API를 호출하지 않고 검증된 거리 기반 추정치를 사용합니다. 통근·단지 좌표 캐시는 만료 정책과 지역코드별 키를 사용합니다.
@@ -119,6 +127,15 @@ python server/collector.py --month 202403   # 특정월 수집
 - `VITE_MAP_PROVIDER`: `kakao` 또는 `naver` (지도 프로바이더 전환)
 - `VITE_NAVER_MAP_CLIENT_ID`: 네이버 클라우드 플랫폼 Client ID (네이버맵 사용 시)
 - 프론트엔드 `VITE_*` 변수는 빌드 타임에 번들에 포함됨 (런타임 아님)
+- `CACHE_DB_PATH`: 단지 좌표·통근 시간 캐시를 저장할 SQLite 파일 경로. 매일 자동 커밋되는 실거래 DB
+  (`search_house.db`)가 서버 실행만으로 바뀌지 않도록 별도 파일을 쓰며, 이 파일은 git 에 올리지 않는다.
+- `TRUSTED_PROXY_HOPS`: `/api/optimize` 요청 제한에서 `X-Forwarded-For` 의 오른쪽에서 몇 번째 값을 클라이언트로
+  볼지 정한다. Render 처럼 프록시 뒤에 배포할 때는 Render 환경변수에 직접 설정해야 효과가 있으며,
+  기본값 0 이면 모든 사용자가 프록시 주소 하나로 묶여 한도를 같이 쓴다.
+- `OPTIMIZE_AGGREGATE_TTL_SECONDS`: 단지 시세 집계 결과를 메모리에 보관하는 시간(초). 실거래 DB 를 교체한 뒤
+  바로 반영하려면 서버를 재시작하거나 값을 낮춘다.
+- `OPTIMIZE_AGGREGATE_MAX_ENTRIES`: 메모리에 보관할 집계 결과 수. 항목당 1.6~2.5MB 라 기본 16개면 최대 약 40MB 를
+  쓰며, 넘치면 오래된 항목부터 버린다.
 
 ## 커밋 규격
 
