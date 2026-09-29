@@ -19,7 +19,7 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: '1'
         run: |
-          python -m py_compile server/main.py server/lib/kakao_api.py server/collector.py server/collector_rent.py
+          python -m py_compile server/main.py server/lib/kakao_api.py server/lib/molit_response.py server/collector.py server/collector_rent.py
           python -m unittest discover -s tests -v
 
   frontend:
@@ -36,4 +36,5 @@ jobs:
           cache-dependency-path: client/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build

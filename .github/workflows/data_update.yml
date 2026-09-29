@@ -14,17 +14,49 @@ on:
         required: false
         default: '3'
 
+# 두 실행이 같은 DB 파일을 각자 고쳐 커밋하면 바이너리라 병합할 수 없다.
+# 수집 도중에 끊으면 그날 수집분을 잃으므로 뒤 실행을 취소하지 않고 대기시킨다.
+concurrency:
+  group: molit-data-collector
+  cancel-in-progress: false
+
 jobs:
   update-real-estate-data:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      # 입력값을 스크립트에 ${{ }} 로 끼워 넣으면 셸 코드로 실행될 수 있어 env 로만 받는다.
+      - name: Validate inputs
+        id: args
+        env:
+          INPUT_MONTH: ${{ github.event.inputs.month }}
+          INPUT_MONTHS: ${{ github.event.inputs.months }}
+        run: |
+          if [ -n "$INPUT_MONTH" ]; then
+            if ! [[ "$INPUT_MONTH" =~ ^[0-9]{4}(0[1-9]|1[0-2])$ ]]; then
+              echo "::error::month must be 6 digits in YYYYMM format."
+              exit 1
+            fi
+            echo "Running collectors for specified month: $INPUT_MONTH"
+            echo "flag=--month" >> "$GITHUB_OUTPUT"
+            echo "value=$INPUT_MONTH" >> "$GITHUB_OUTPUT"
+          else
+            MONTHS="${INPUT_MONTHS:-3}"
+            if ! [[ "$MONTHS" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::months must be a positive integer."
+              exit 1
+            fi
+            echo "Re-collecting the last $MONTHS months."
+            echo "flag=--months" >> "$GITHUB_OUTPUT"
+            echo "value=$MONTHS" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -35,25 +67,55 @@ jobs:
 
       # 실거래 신고 기한이 계약 후 30일이라 당월만 받으면 해당 월 후반 신고분을 놓친다.
       # 기본으로 최근 3개월을 다시 훑어 지연 신고와 정정 내역까지 반영한다.
-      - name: Run MOLIT Data collector
+      - name: Run MOLIT trade collector
+        id: trade
         env:
           DATA_API_KEY: ${{ secrets.DATA_API_KEY }}
+          COLLECTOR_FLAG: ${{ steps.args.outputs.flag }}
+          COLLECTOR_VALUE: ${{ steps.args.outputs.value }}
         run: |
-          if [ -n "${{ github.event.inputs.month }}" ]; then
-            echo "Running collector for specified month: ${{ github.event.inputs.month }}"
-            python server/collector.py --month "${{ github.event.inputs.month }}"
-            python server/collector_rent.py --month "${{ github.event.inputs.month }}"
-          else
-            MONTHS="${{ github.event.inputs.months }}"
-            MONTHS="${MONTHS:-3}"
-            echo "Re-collecting the last $MONTHS months."
-            python server/collector.py --months "$MONTHS"
-            python server/collector_rent.py --months "$MONTHS"
-          fi
+          python server/collector.py "$COLLECTOR_FLAG" "$COLLECTOR_VALUE"
 
+      # 매매 수집이 실패해도 전월세는 받는다. 앞 단계가 실패해 매매 수집이
+      # 아예 돌지 못한 경우(skipped)에는 전월세도 돌리지 않는다.
+      - name: Run MOLIT rent collector
+        if: ${{ !cancelled() && steps.trade.outcome != 'skipped' }}
+        env:
+          DATA_API_KEY: ${{ secrets.DATA_API_KEY }}
+          COLLECTOR_FLAG: ${{ steps.args.outputs.flag }}
+          COLLECTOR_VALUE: ${{ steps.args.outputs.value }}
+        run: |
+          python server/collector_rent.py "$COLLECTOR_FLAG" "$COLLECTOR_VALUE"
+
+      # 일부 지역만 실패한 날에도 받은 만큼은 남긴다. 수집 단계가 실패했으면
+      # 이 단계가 성공해도 잡은 실패로 끝난다.
+      # 입력 검증 실패처럼 체크아웃조차 안 된 경우에는 저장소가 없어 git 오류만
+      # 더 나므로, 매매 수집이 실제로 돈 경우에만 실행한다.
       - name: Commit and Push Database Update
+        if: ${{ !cancelled() && steps.trade.outcome != 'skipped' }}
+        env:
+          TARGET_BRANCH: ${{ github.ref_name }}
         run: |
           git config --global user.name "SearchHouse-Bot"
           git config --global user.email "bot@searchhouse.com"
           git add server/data/search_house.db
-          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: [자동] 실거래가 데이터 업데이트 [skip ci]" && git push)
+          if git diff --staged --quiet; then
+            echo "No database changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: [자동] 실거래가 데이터 업데이트 [skip ci]"
+
+          # 수집이 도는 동안 main 에 코드 커밋이 들어오면 그냥 푸시는 거절된다.
+          for attempt in 1 2 3 4 5; do
+            if git pull --rebase --autostash origin "$TARGET_BRANCH" \
+                && git push origin "HEAD:$TARGET_BRANCH"; then
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            echo "Push attempt $attempt failed."
+            if [ "$attempt" -lt 5 ]; then
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "::error::Failed to push database update after 5 attempts."
+          exit 1
