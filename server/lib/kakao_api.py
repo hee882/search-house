@@ -4,6 +4,7 @@ import json
 import math
 import sqlite3
 import logging
+import threading
 from contextlib import closing
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -14,6 +15,19 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
 CACHE_TTL_SECONDS = int(os.getenv("COMMUTE_CACHE_TTL_SECONDS", "900"))
+# 검색 결과가 없던 단지도 나중에 카카오에 등록될 수 있어 영구 보관하지 않고 주기적으로 다시 묻는다
+GEOCODE_NEGATIVE_TTL_SECONDS = int(os.getenv("GEOCODE_NEGATIVE_TTL_SECONDS", "604800"))
+
+# 후보 분석이 ThreadPoolExecutor에서 병렬로 돌고, Session은 스레드 간 공유가 보장되지 않아 스레드마다 둔다
+_thread_local = threading.local()
+
+_schema_lock = threading.Lock()
+_initialized_db_paths = set()
+
+
+def _is_javascript_key(key):
+    """지도 SDK용 JavaScript 키인지 판별한다 (REST API에 쓰면 인증이 거부된다)."""
+    return key.startswith('feb433')
 
 
 def is_realtime_routing_available():
@@ -22,7 +36,20 @@ def is_realtime_routing_available():
     REST 키가 없거나 JavaScript 키가 잘못 설정된 경우 모든 소요시간이
     거리 기반 추정치로 계산되므로, 응답에서 이를 그대로 알려야 한다.
     """
-    return bool(KAKAO_REST_API_KEY) and not KAKAO_REST_API_KEY.startswith('feb433')
+    return bool(KAKAO_REST_API_KEY) and not _is_javascript_key(KAKAO_REST_API_KEY)
+
+
+def _http_get(url, headers, params):
+    """카카오 API GET 호출.
+
+    요청 한 번에 같은 호스트를 여러 번 부르므로, 스레드별 Session을 재사용해
+    호출마다 TCP·TLS 연결을 새로 맺지 않게 한다.
+    """
+    session = getattr(_thread_local, "session", None)
+    if session is None:
+        session = requests.Session()
+        _thread_local.session = session
+    return session.get(url, headers=headers, params=params, timeout=5)
 
 
 def _connect(db_path):
@@ -39,6 +66,78 @@ def _connect(db_path):
     except sqlite3.Error as e:  # 읽기 전용 파일시스템 등
         logger.debug(f"WAL 설정 실패: {e}")
     return conn
+
+
+def _initialize_schema(db_path):
+    """캐시 테이블 생성, 구버전 마이그레이션, 만료 행 정리를 수행한다."""
+    now = datetime.now().timestamp()
+    with closing(_connect(db_path)) as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS complex_coords_v2 (
+                city_code TEXT NOT NULL, apt_name TEXT NOT NULL, dong_name TEXT NOT NULL,
+                lat REAL, lng REAL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (city_code, apt_name, dong_name)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS commute_cache_v3 (
+                from_lat REAL, from_lng REAL, to_lat REAL, to_lng REAL,
+                transport_mode TEXT, cache_key TEXT,
+                duration_min INTEGER, distance_km REAL, updated_at REAL,
+                PRIMARY KEY (from_lat, from_lng, to_lat, to_lng, transport_mode, cache_key)
+            )
+        ''')
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(commute_cache_v3)")}
+        if "updated_at" not in columns:
+            conn.execute("ALTER TABLE commute_cache_v3 ADD COLUMN updated_at REAL")
+            conn.execute("UPDATE commute_cache_v3 SET updated_at = ? WHERE updated_at IS NULL", (now,))
+        # cache_key에 출발 날짜가 들어가 매주 새 행이 쌓이므로, 지우지 않으면 테이블이 계속 커진다
+        conn.execute(
+            "DELETE FROM commute_cache_v3 WHERE updated_at IS NULL OR updated_at < ?",
+            (now - CACHE_TTL_SECONDS,),
+        )
+        conn.commit()
+
+
+def _ensure_schema(db_path):
+    """db_path의 캐시 스키마를 프로세스당 한 번만 초기화한다.
+
+    요청 한 번에 수십 번 호출되는 경로라, 매번 CREATE TABLE·PRAGMA·commit을
+    실행하면 병렬 호출끼리 쓰기 락을 두고 경합한다.
+    """
+    key = os.path.abspath(db_path)
+    with _schema_lock:
+        if key in _initialized_db_paths:
+            return
+        _initialize_schema(db_path)
+        _initialized_db_paths.add(key)
+
+
+def _execute_cache_query(db_path, sql, params, write):
+    _ensure_schema(db_path)
+    with closing(_connect(db_path)) as conn:
+        cursor = conn.execute(sql, params)
+        if not write:
+            return cursor.fetchone()
+        conn.commit()
+        return None
+
+
+def _run_cache_query(db_path, sql, params, write=False):
+    """캐시 DB에 쿼리 한 건을 실행한다. 조회면 첫 행을 반환하고, 쓰기면 커밋한다.
+
+    프로세스가 떠 있는 동안 같은 경로의 DB 파일이 지워졌다 다시 만들어지면
+    초기화 기록만 남고 테이블은 없는 상태가 되므로, 한 번만 재초기화 후 재시도한다.
+    """
+    try:
+        return _execute_cache_query(db_path, sql, params, write)
+    except sqlite3.OperationalError as e:
+        if "no such table" not in str(e):
+            raise
+        with _schema_lock:
+            _initialized_db_paths.discard(os.path.abspath(db_path))
+        return _execute_cache_query(db_path, sql, params, write)
 
 # city_code → 구/시 이름 역방향 조회 테이블 (정밀 검색 쿼리 구성용)
 def _build_code_to_district():
@@ -64,29 +163,27 @@ def get_precise_coordinates(db_path, apt_name, dong_name, city_code=None):
     # 1. 캐시 확인 (외부 API 호출 전에 커넥션을 반드시 닫는다)
     normalized_city = str(city_code or "")
     try:
-        with closing(_connect(db_path)) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS complex_coords_v2 (
-                    city_code TEXT NOT NULL, apt_name TEXT NOT NULL, dong_name TEXT NOT NULL,
-                    lat REAL, lng REAL,
-                    updated_at REAL NOT NULL,
-                    PRIMARY KEY (city_code, apt_name, dong_name)
-                )
-            ''')
-            conn.commit()
-            cache = conn.execute(
-                'SELECT lat, lng FROM complex_coords_v2 WHERE city_code = ? AND apt_name = ? AND dong_name = ?',
-                (normalized_city, apt_name, dong_name),
-            ).fetchone()
+        cache = _run_cache_query(
+            db_path,
+            'SELECT lat, lng, updated_at FROM complex_coords_v2 WHERE city_code = ? AND apt_name = ? AND dong_name = ?',
+            (normalized_city, apt_name, dong_name),
+        )
         if cache:
-            return cache[0], cache[1]
+            cached_lat, cached_lng, updated_at = cache
+            if cached_lat is not None and cached_lng is not None:
+                return cached_lat, cached_lng
+            # 좌표가 NULL인 행은 "카카오에 검색 결과가 없었다"는 기록이라 TTL 동안은 다시 묻지 않는다
+            if updated_at is not None and datetime.now().timestamp() - updated_at < GEOCODE_NEGATIVE_TTL_SECONDS:
+                return None, None
     except Exception as e:
         logger.error(f"Complex cache lookup error: {e}")
 
     # 2. API 호출
     lat, lng = None, None
+    # 장애나 쿼터 초과까지 "결과 없음"으로 굳지 않도록, 정상 응답에 문서가 없을 때만 True로 바꾼다
+    no_result = False
     if KAKAO_REST_API_KEY:
-        if KAKAO_REST_API_KEY.startswith('feb433'):
+        if _is_javascript_key(KAKAO_REST_API_KEY):
             logger.error("[Kakao API] Detected JavaScript Key. Please use REST API Key instead.")
         else:
             url = "https://dapi.kakao.com/v2/local/search/keyword.json"
@@ -101,7 +198,7 @@ def get_precise_coordinates(db_path, apt_name, dong_name, city_code=None):
             params = {"query": query, "size": 5} # 5개까지 받아서 필터링
             
             try:
-                res = requests.get(url, headers=headers, params=params, timeout=5)
+                res = _http_get(url, headers, params)
                 if res.status_code == 200:
                     data = res.json()
                     if data.get('documents'):
@@ -118,31 +215,38 @@ def get_precise_coordinates(db_path, apt_name, dong_name, city_code=None):
                         
                         lat, lng = float(target_doc['y']), float(target_doc['x'])
                         logger.info(f"[Kakao Geocode] Success for {query}: {lat}, {lng} ({target_doc.get('place_name')})")
+                    else:
+                        no_result = True
+                else:
+                    logger.warning(f"[Kakao Geocode] Request failed for {query}: HTTP {res.status_code}")
             except Exception as e:
                 logger.error(f"Geocoding API failed: {e}")
 
     # 3. 결과 캐싱 및 반환
-    if lat and lng:
+    # 결과 없음도 기록해 두지 않으면 같은 단지를 요청마다 다시 조회해 쿼터와 응답 시간을 낭비한다
+    found = bool(lat and lng)
+    if found or no_result:
         try:
-            with closing(_connect(db_path)) as conn:
-                conn.execute(
-                    '''INSERT OR REPLACE INTO complex_coords_v2
-                       (city_code, apt_name, dong_name, lat, lng, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?)''',
-                    (normalized_city, apt_name, dong_name, lat, lng, datetime.now().timestamp()),
-                )
-                conn.commit()
+            _run_cache_query(
+                db_path,
+                '''INSERT OR REPLACE INTO complex_coords_v2
+                   (city_code, apt_name, dong_name, lat, lng, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)''',
+                (normalized_city, apt_name, dong_name, lat, lng, datetime.now().timestamp()),
+                write=True,
+            )
         except Exception as e:
             logger.error(f"Complex cache save error: {e}")
-        return lat, lng
 
+    if found:
+        return lat, lng
     return None, None
 
 def call_kakao_api(origin_lng, origin_lat, dest_lng, dest_lat, d_time):
     """카카오 모빌리티 미래 경로 탐색 API 단일 호출 유틸리티"""
-    if not KAKAO_REST_API_KEY or KAKAO_REST_API_KEY.startswith('feb433'): 
+    if not KAKAO_REST_API_KEY or _is_javascript_key(KAKAO_REST_API_KEY):
         return None
-    
+
     url = "https://apis-navi.kakaomobility.com/v1/future/directions"
     headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY.strip()}"}
     params = {
@@ -152,7 +256,7 @@ def call_kakao_api(origin_lng, origin_lat, dest_lng, dest_lat, d_time):
         "priority": "RECOMMEND"
     }
     try:
-        res = requests.get(url, headers=headers, params=params, timeout=5)
+        res = _http_get(url, headers, params)
         if res.status_code == 200:
             data = res.json()
             if data.get('routes') and data['routes'][0]['result_code'] == 0:
@@ -162,6 +266,9 @@ def call_kakao_api(origin_lng, origin_lat, dest_lng, dest_lat, d_time):
                 logger.error(f"[Kakao API] API Error: {data}")
         elif res.status_code == 401:
             logger.error("[Kakao API] 401 Unauthorized: REST API Key is invalid.")
+        else:
+            # 429·5xx를 조용히 버리면 추정치로 대체된 원인을 운영 중에 알 수 없다
+            logger.warning(f"[Kakao API] Directions request failed: HTTP {res.status_code}")
     except Exception as e:
         logger.error(f"API Call failed: {e}")
     return None
@@ -200,27 +307,13 @@ def get_kakao_commute(db_path, from_lat, from_lng, to_lat, to_lng, transport_mod
     # 1. 캐시 확인
     cache_key = departure_time if departure_time else f"arrive_{goal_arrive_time}"
     try:
-        with closing(_connect(db_path)) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS commute_cache_v3 (
-                    from_lat REAL, from_lng REAL, to_lat REAL, to_lng REAL,
-                    transport_mode TEXT, cache_key TEXT,
-                    duration_min INTEGER, distance_km REAL,
-                    PRIMARY KEY (from_lat, from_lng, to_lat, to_lng, transport_mode, cache_key)
-                )
-            ''')
-            columns = {row[1] for row in conn.execute("PRAGMA table_info(commute_cache_v3)")}
-            if "updated_at" not in columns:
-                conn.execute("ALTER TABLE commute_cache_v3 ADD COLUMN updated_at REAL")
-                conn.execute("UPDATE commute_cache_v3 SET updated_at = ? WHERE updated_at IS NULL", (datetime.now().timestamp(),))
-            conn.commit()
-            cache = conn.execute('''
-                SELECT duration_min, distance_km FROM commute_cache_v3
-                WHERE from_lat = ? AND from_lng = ? AND to_lat = ? AND to_lng = ?
-                AND transport_mode = ? AND cache_key = ?
-                AND updated_at IS NOT NULL AND updated_at >= ?
-            ''', (f_lat, f_lng, t_lat, t_lng, transport_mode, cache_key,
-                  datetime.now().timestamp() - CACHE_TTL_SECONDS)).fetchone()
+        cache = _run_cache_query(db_path, '''
+            SELECT duration_min, distance_km FROM commute_cache_v3
+            WHERE from_lat = ? AND from_lng = ? AND to_lat = ? AND to_lng = ?
+            AND transport_mode = ? AND cache_key = ?
+            AND updated_at IS NOT NULL AND updated_at >= ?
+        ''', (f_lat, f_lng, t_lat, t_lng, transport_mode, cache_key,
+              datetime.now().timestamp() - CACHE_TTL_SECONDS))
         if cache:
             return cache[0], cache[1]
     except Exception as e:
@@ -264,13 +357,12 @@ def get_kakao_commute(db_path, from_lat, from_lng, to_lat, to_lng, transport_mod
 
     # 4. 결과 캐싱 (TTL 만료된 기존 행은 새 값으로 갱신해야 하므로 REPLACE 사용)
     try:
-        with closing(_connect(db_path)) as conn:
-            conn.execute('''
-                INSERT OR REPLACE INTO commute_cache_v3
-                (from_lat, from_lng, to_lat, to_lng, transport_mode, cache_key, duration_min, distance_km, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (f_lat, f_lng, t_lat, t_lng, transport_mode, cache_key, duration, distance, datetime.now().timestamp()))
-            conn.commit()
+        _run_cache_query(db_path, '''
+            INSERT OR REPLACE INTO commute_cache_v3
+            (from_lat, from_lng, to_lat, to_lng, transport_mode, cache_key, duration_min, distance_km, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (f_lat, f_lng, t_lat, t_lng, transport_mode, cache_key, duration, distance, datetime.now().timestamp()),
+            write=True)
     except Exception as e:
         logger.error(f"Cache save error: {e}")
 
