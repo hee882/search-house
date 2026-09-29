@@ -1,6 +1,8 @@
 // Kakao Maps Provider
 // SDK: https://dapi.kakao.com/v2/maps/sdk.js
 
+import { escapeHtml } from '../../html.js';
+
 const KAKAO_KEY = import.meta.env.VITE_KAKAO_MAP_KEY;
 
 // 표준 줌(1-20, 높을수록 가까움) ↔ 카카오 레벨(1-14, 높을수록 멀어짐) 변환
@@ -161,7 +163,7 @@ export function drawPolyline(map, path, options = {}) {
     
     overlay = new kakaoMaps.CustomOverlay({
       position: new kakaoMaps.LatLng(midLat, midLng),
-      content: `<div style="background:${options.color}; color:white; padding:4px 8px; border-radius:12px; font-size:11px; font-weight:900; box-shadow:0 2px 6px rgba(0,0,0,0.2); white-space:nowrap; border:1.5px solid white;">${options.label}</div>`,
+      content: `<div style="background:${options.color}; color:white; padding:4px 8px; border-radius:12px; font-size:11px; font-weight:900; box-shadow:0 2px 6px rgba(0,0,0,0.2); white-space:nowrap; border:1.5px solid white;">${escapeHtml(options.label)}</div>`,
       map
     });
   }

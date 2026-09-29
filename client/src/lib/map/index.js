@@ -1,7 +1,8 @@
 import * as kakao from './providers/kakao';
 import * as naver from './providers/naver';
 
-const MAP_PROVIDER = import.meta.env.VITE_MAP_PROVIDER || 'naver';
+// 네이버 지도는 NCP 인증 문제로 쓰지 않으므로, 설정이 없으면 카카오로 동작한다.
+const MAP_PROVIDER = import.meta.env.VITE_MAP_PROVIDER || 'kakao';
 
 export function getProvider() {
   return MAP_PROVIDER === 'naver' ? naver : kakao;

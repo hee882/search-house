@@ -1,25 +1,18 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, ShieldCheck, List, Settings2, Train, X, HelpCircle, DollarSign, Home, Calculator, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight, Coffee, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { Search, MapPin, Coins, Car, Bus, Loader2, ChevronDown, ExternalLink, Trophy, Zap, ShieldCheck, Settings2, X, HelpCircle, Home, AlertTriangle, ChevronLeft, ChevronRight, Coffee, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { useMap, addMarker, addOverlay, clearMarkers, drawPolyline, setBounds, getZoom, setZoom, geocodeAddress } from './lib/map';
+import { findNearestStations, isWithinCorrectionRange } from './lib/geo';
+import { RESIDENT_TYPES, getResidentTypeLabel, getTimeStatus, getBudgetStatus, getIncomeRatio, getNaverLandUrl } from './lib/housing';
+import { getRequestErrorMessage, getSearchErrorMessage } from './lib/errors';
+import { escapeHtml } from './lib/html';
+import { buildUniqueKeys } from './lib/keys';
+import { useIsMobile } from './lib/useIsMobile';
+import StationSearch from './components/StationSearch';
+import HelpModal from './components/HelpModal';
 
-// 지하철 호선별 공식 색상
-const LINE_COLORS = {
-  '1호선': '#0052A4', '2호선': '#00A84D', '3호선': '#EF7C1C', '4호선': '#00A5DE',
-  '5호선': '#996CAC', '6호선': '#CD7C2F', '7호선': '#747F00', '8호선': '#E6186C',
-  '9호선': '#BDB092',
-  '수인분당선': '#F5A200', '신분당선': '#D4003B', '경의중앙선': '#77C4A3',
-  '경의선': '#77C4A3', '경춘선': '#0C8E72', '경강선': '#003DA5',
-  '공항철도': '#0090D2', '서해선': '#81A914',
-  '우이신설선': '#B7C452', '신림선': '#6789CA', '에버라인': '#55B332',
-  '김포골드라인': '#A17E00', '의정부경전철': '#FDA600',
-  '신안산선': '#A71E31', '위례신사선': '#F5A200', '동북선': '#2E8B57',
-  '인천1호선': '#7CA8D5', '인천2호선': '#ED8000',
-  'GTX-A': '#9A6292',
-};
-
-const getLineColor = (line) => LINE_COLORS[line.trim()] || '#A0AEC0';
-const getShortLineName = (line) => line.trim();
 const REQUEST_TIMEOUT_MS = 15000;
+// 진행 문구를 읽을 틈도 없이 넘어가지 않게 하는 순환 간격
+const LOADING_MESSAGE_INTERVAL_MS = 1200;
 
 const fetchWithTimeout = async (url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) => {
   const controller = new AbortController();
@@ -31,349 +24,8 @@ const fetchWithTimeout = async (url, options = {}, timeoutMs = REQUEST_TIMEOUT_M
   }
 };
 
-const getDistanceKm = (lat1, lng1, lat2, lng2) => {
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
-
-// 서버는 법정동 좌표로 최근접역을 계산하므로, 클라이언트에서 단지 좌표를 보정한 뒤에는
-// 보정된 좌표 기준으로 다시 계산해야 표시되는 역이 실제 위치와 어긋나지 않는다.
-const findNearestStations = (lat, lng, stations, count = 3, maxDistanceKm = 2) =>
-  stations
-    .map((station) => ({ name: station.name, distance: getDistanceKm(lat, lng, station.lat, station.lng) }))
-    .filter((item) => Number.isFinite(item.distance) && item.distance <= maxDistanceKm)
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, count)
-    .map((item) => item.name);
-
-const RESIDENT_TYPES = [
-  { id: 'jeonse', label: '전세' },
-  { id: 'wolse', label: '월세' },
-  { id: 'buy', label: '매매' },
-];
-
-const getResidentTypeLabel = (id) => RESIDENT_TYPES.find((type) => type.id === id)?.label || '전월세';
-
-const getRequestErrorMessage = (error, fallback) =>
-  error?.name === 'AbortError' ? '요청 시간이 초과되었습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.' : fallback;
-
-const getTimeStatus = (minutes) => {
-  if (minutes <= 30) return { color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100', dot: 'bg-green-500' };
-  if (minutes <= 60) return { color: 'text-yellow-600', bg: 'bg-yellow-50', border: 'border-yellow-100', dot: 'bg-yellow-500' };
-  if (minutes <= 90) return { color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100', dot: 'bg-orange-500' };
-  return { color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100', dot: 'bg-red-500' };
-};
-
-function LineBadge({ line }) {
-  if (!line) return null;
-  const lines = line.split(/[,,/]/);
-  return (
-    <div className="flex gap-1 items-center flex-nowrap">
-      {lines.map((l, i) => (
-        <div key={i} className="px-1.5 py-0.5 rounded-md text-[8px] font-black text-white shadow-sm flex items-center justify-center whitespace-nowrap leading-tight" style={{ backgroundColor: getLineColor(l) }}>
-          {getShortLineName(l)}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const getChosung = (str) => {
-  const cho = ["ㄱ", "ㄲ", "ㄴ", "ㄷ", "ㄸ", "ㄹ", "ㅁ", "ㅂ", "ㅃ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅉ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"];
-  let result = "";
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i) - 44032;
-    if (code > -1 && code < 11172) result += cho[Math.floor(code / 588)];
-    else result += str.charAt(i);
-  }
-  return result;
-};
-
-const STATION_ALIASES = {
-  '총신대입구역': ['이수역', '이수'],
-  '총신대입구(이수)역': ['이수역', '이수'],
-  '이수역': ['총신대입구역', '총신대입구'],
-  '서울역': ['서울'],
-  '잠실역': ['신천역', '잠실새내역'],
-};
-
-const getNaverLandUrl = (name, dong) => {
-  // 동이름 포함 시 검색 정확도 향상 (MOLIT 단지명과 네이버 명칭 차이 보완)
-  const query = dong ? `${dong} ${name}` : name;
-  const q = encodeURIComponent((query || '').trim());
-  return `https://fin.land.naver.com/search?query=${q}`;
-};
-
-function StationSearch({ value, onChange, placeholder, stations, icon: IconComponent, colorClass, stationLoading, stationError, onRetry }) {
-  const [keyword, setKeyword] = useState(value?.name || "");
-  const [isOpen, setIsOpen] = useState(false);
-  const [selectedIndex, setSelectedIndex] = useState(-1);
-  const dropdownRef = useRef(null);
-  const listRef = useRef(null);
-
-  const isMobile = window.innerWidth < 768;
-
-  const filteredStations = useMemo(() => {
-    if (!keyword || keyword === value?.name) return stations.slice(0, 5);
-    const kw = keyword.trim();
-    const searchChosung = getChosung(kw);
-    const isChosungOnly = /^[ㄱ-ㅎ]+$/.test(kw);
-    return stations
-      .filter(s => {
-        const nameMatch = s.name.includes(kw) || getChosung(s.name).includes(searchChosung);
-        if (nameMatch) return true;
-        const aliases = STATION_ALIASES[s.name] || [];
-        return aliases.some(alias => alias.includes(kw) || getChosung(alias).includes(searchChosung));
-      })
-      .sort((a, b) => {
-        const score = (s) => {
-          const n = s.name;
-          const aliases = STATION_ALIASES[n] || [];
-          const isAliasMatch = aliases.some(a => a === kw || a === kw + '역');
-          let sc = (s.line?.split(',').length || 1) * 2;
-          if (n === kw || n === kw + '역' || isAliasMatch) sc += 100;
-          else if (n.startsWith(kw)) sc += 50;
-          else if (!isChosungOnly && n.includes(kw)) sc += 20;
-          else if (getChosung(n).startsWith(searchChosung)) sc += 15;
-          return sc;
-        };
-        return score(b) - score(a);
-      })
-      .slice(0, 15);
-  }, [keyword, stations, value]);
-
-  const handleSelect = (station) => {
-    onChange(station);
-    setKeyword(station.name);
-    setIsOpen(false);
-    setSelectedIndex(-1);
-  };
-
-  const handleKeyDown = (e) => {
-    if (!isOpen) {
-      if (e.key === 'ArrowDown' || e.key === 'Enter') setIsOpen(true);
-      return;
-    }
-    const list = filteredStations;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSelectedIndex(prev => {
-        const next = Math.min(prev + 1, list.length - 1);
-        listRef.current?.children[next]?.scrollIntoView({ block: 'nearest' });
-        return next;
-      });
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSelectedIndex(prev => {
-        const next = Math.max(prev - 1, 0);
-        listRef.current?.children[next]?.scrollIntoView({ block: 'nearest' });
-        return next;
-      });
-    } else if ((e.key === 'Enter' || e.key === 'Tab') && selectedIndex >= 0 && list[selectedIndex]) {
-      e.preventDefault();
-      handleSelect(list[selectedIndex]);
-    } else if (e.key === 'Escape') {
-      setIsOpen(false);
-      setSelectedIndex(-1);
-    }
-  };
-
-  useEffect(() => {
-    const handleClickOutside = (e) => { if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setIsOpen(false); };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  return (
-    <div className={`relative group w-full ${isOpen && isMobile ? 'z-[9999]' : ''}`} ref={dropdownRef}>
-      <div className={`flex items-center relative transition-all duration-300 ${isOpen && isMobile ? 'fixed top-0 inset-x-0 p-4 bg-white shadow-xl z-[10000]' : ''}`}>
-        {IconComponent && <IconComponent className={`absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-300 group-focus-within:${colorClass} transition-colors ${isOpen && isMobile ? 'left-8' : ''}`} />}
-        <input
-          type="text" value={keyword}
-          onChange={(e) => { setKeyword(e.target.value); setIsOpen(true); setSelectedIndex(0); }}
-          onFocus={() => setIsOpen(true)}
-          onKeyDown={handleKeyDown}
-          className={`w-full pl-10 pr-10 py-3 bg-gray-50 border-none rounded-xl text-[14px] font-black focus:ring-2 focus:ring-blue-500/20 outline-none transition-all placeholder:text-gray-300 ${isOpen && isMobile ? 'pl-14 py-4 text-[16px] bg-gray-100 rounded-2xl' : ''}`}
-          placeholder={placeholder}
-        />
-        {(keyword || (isOpen && isMobile)) && (
-            <button aria-label="검색어 지우기"
-            onClick={() => { setKeyword(""); if(isMobile) setIsOpen(false); }}
-            className={`absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600 rounded-full bg-gray-200/50 ${isOpen && isMobile ? 'right-8' : ''}`}
-          >
-            <X size={14} strokeWidth={3} />
-          </button>
-        )}
-      </div>
-
-      {isOpen && (
-        <div className={`absolute left-0 w-full mb-2 md:mt-1.5 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-gray-100 z-[2000] overflow-hidden transition-all duration-300
-          ${isMobile 
-            ? 'fixed inset-0 top-[72px] rounded-none border-none shadow-none z-[9999]' 
-            : 'absolute top-full'
-          }
-        `}>
-          <div className="px-4 py-3 bg-gray-50/50 text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100 flex justify-between items-center">
-            <span>{stationLoading ? '데이터 로딩 중...' : (!keyword ? '주요 거점 추천' : '검색 결과')}</span>
-            {stationError && <button onClick={onRetry} className="text-blue-600 hover:underline" aria-label="지하철역 목록 다시 불러오기">재시도</button>}
-          </div>
-          {stationLoading ? (
-            <div className="p-12 flex flex-col items-center gap-4">
-              <Loader2 className="animate-spin text-blue-500" size={32} />
-              <p className="text-[12px] font-bold text-gray-400">전국 지하철역 매핑 중...</p>
-            </div>
-          ) : (
-            <div ref={listRef} className={`overflow-y-auto custom-scrollbar ${isMobile ? 'h-[calc(100%-40px)] pb-20' : 'max-h-[350px]'}`}>
-              {filteredStations.length > 0 ? (
-                filteredStations.map((s, i) => (
-                  <button 
-                    key={i} 
-                    onClick={() => handleSelect(s)} 
-                    onMouseEnter={() => setSelectedIndex(i)} 
-                    className={`w-full text-left px-6 py-4 flex items-center gap-5 transition-colors duration-150 relative overflow-hidden group/item ${selectedIndex === i ? 'bg-blue-50/80' : 'text-gray-600 border-b border-gray-50 last:border-0'}`}
-                  >
-                    <div className={`absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500 transition-transform duration-200 ease-out ${selectedIndex === i ? 'translate-x-0' : '-translate-x-full'}`} />
-                    <div className={`shrink-0 p-2.5 rounded-2xl transition-all duration-200 ${selectedIndex === i ? 'bg-white shadow-md scale-110' : 'bg-gray-100'}`}>
-                      <Train className={`h-5 w-5 ${selectedIndex === i ? 'text-blue-500' : 'text-gray-400'}`} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-[16px] font-black tracking-tight truncate transition-colors ${selectedIndex === i ? 'text-blue-700' : 'text-gray-800'}`}>
-                        {s.name}
-                        {STATION_ALIASES[s.name] && <span className="ml-2 text-[13px] font-bold text-gray-400">({STATION_ALIASES[s.name][0].replace('역', '')})</span>}
-                      </div>
-                      <div className="mt-1.5 flex items-center gap-2 overflow-x-auto no-scrollbar"><LineBadge line={s.line} /></div>
-                    </div>
-                  </button>
-                ))
-              ) : (
-                <div className="p-20 text-center">
-                  <p className="text-[14px] font-black text-gray-300">검색 결과가 없습니다.</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function HelpModal({ isOpen, onClose }) {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-end md:items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md animate-in fade-in duration-300" />
-      <div className="relative bg-white w-full md:w-[520px] md:max-h-[88vh] max-h-[93vh] md:rounded-[2.5rem] rounded-t-[2.5rem] shadow-[0_30px_80px_rgba(0,0,0,0.35)] overflow-hidden flex flex-col animate-in slide-in-from-bottom-10 duration-500" onClick={e => e.stopPropagation()}>
-
-        {/* 헤더 */}
-        <div className="sticky top-0 bg-white/90 backdrop-blur-xl z-10 px-7 pt-6 pb-4 border-b border-gray-100 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-gray-900 rounded-2xl flex items-center justify-center shadow-lg">
-              <Home size={18} className="text-white" />
-            </div>
-            <div>
-              <span className="text-[17px] font-black tracking-tight text-gray-900 leading-none block">Search House 가이드</span>
-              <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">당신의 시간을 되찾는 방법</span>
-            </div>
-          </div>
-          <button onClick={onClose} aria-label="사용 가이드 닫기" className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-all active:scale-90"><X size={18} className="text-gray-500" /></button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
-
-          {/* 히어로 훅 */}
-          <div className="bg-gray-900 px-7 py-8 text-white">
-            <div className="text-[11px] font-black text-blue-400 uppercase tracking-widest mb-3">The Hidden Cost</div>
-            <h2 className="text-[22px] font-black leading-[1.2] tracking-tight mb-4">
-              월세 80만원짜리 집이<br/>
-              <span className="text-blue-400">실제로는 140만원</span>일 수 있습니다.
-            </h2>
-            <p className="text-[12px] font-medium text-slate-400 leading-relaxed">
-              왕복 90분 통근 기준, 연봉 4천만원 직장인은 매달 약 <span className="text-white font-black">60만원의 시간</span>을 길 위에 버리고 있습니다. 이 앱은 그 숨겨진 비용까지 계산합니다.
-            </p>
-          </div>
-
-          <div className="px-7 py-6 space-y-7">
-
-            {/* 어떤 걸 찾아주나 */}
-            <div className="space-y-3">
-              <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">무엇을 찾아주나요</div>
-              <div className="space-y-2.5">
-                {[
-                  { icon: <MapPin size={14} className="text-blue-500" />, bg: 'bg-blue-50', title: '최적 주거 입지', desc: '직장까지의 실제 출퇴근 시간과 주거비를 함께 고려한 수도권 최적 동네를 추천합니다.' },
-                  { icon: <DollarSign size={14} className="text-green-500" />, bg: 'bg-green-50', title: '진짜 월 지출액', desc: '집세 + 교통비에 더해 "내 시급 × 통근시간"을 계산해 눈에 보이지 않는 비용을 수치화합니다.' },
-                  { icon: <TrendingUp size={14} className="text-orange-500" />, bg: 'bg-orange-50', title: '실거래가 기반 단지', desc: '국토교통부 실거래가 API로 수집한 최근 전·월세 데이터를 기반으로 현실적인 단지를 제시합니다.' },
-                ].map((item, i) => (
-                  <div key={i} className="flex gap-3 p-3.5 bg-gray-50 rounded-2xl border border-gray-100">
-                    <div className={`shrink-0 w-8 h-8 ${item.bg} rounded-xl flex items-center justify-center`}>{item.icon}</div>
-                    <div>
-                      <div className="text-[12px] font-black text-gray-900 mb-0.5">{item.title}</div>
-                      <div className="text-[11px] font-medium text-gray-400 leading-snug">{item.desc}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 사용법 3스텝 */}
-            <div className="space-y-3">
-              <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">3단계로 끝나는 분석</div>
-              <div className="flex gap-2">
-                {[
-                  { step: '1', label: '직장역 선택', sub: '통근 시작점' },
-                  { step: '2', label: '연봉 입력', sub: '시급 자동 계산' },
-                  { step: '3', label: '결과 확인', sub: '지도 위에 표시' },
-                ].map((s, i) => (
-                  <div key={i} className="flex-1 bg-gray-900 rounded-2xl p-3.5 text-center relative overflow-hidden">
-                    <div className="absolute top-1 right-2 text-[28px] font-black text-white/5">{s.step}</div>
-                    <div className="text-[18px] font-black text-blue-400 mb-1">{s.step}</div>
-                    <div className="text-[11px] font-black text-white leading-tight">{s.label}</div>
-                    <div className="text-[9px] font-medium text-slate-500 mt-0.5">{s.sub}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 핵심 인사이트 */}
-            <div className="bg-blue-600 rounded-[2rem] p-6 text-white space-y-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Zap size={14} className="text-yellow-300 fill-yellow-300" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-blue-200">Key Insight</span>
-              </div>
-              <p className="text-[14px] font-black leading-snug">
-                "같은 연봉이라도 어디에 사느냐에 따라<br/>
-                <span className="text-yellow-300">실질 소득이 연 700만원 이상</span> 차이납니다."
-              </p>
-              <p className="text-[11px] font-medium text-blue-200 leading-relaxed">
-                통근 1시간 단축 = 월 30만원 시간 절약. 10년이면 3,600만원. 이게 부동산 선택의 진짜 ROI입니다.
-              </p>
-            </div>
-
-            {/* 맞벌이 특화 */}
-            <div className="flex gap-3 p-4 bg-pink-50 rounded-2xl border border-pink-100">
-              <div className="shrink-0 w-8 h-8 bg-pink-100 rounded-xl flex items-center justify-center"><ShieldCheck size={14} className="text-pink-500" /></div>
-              <div>
-                <div className="text-[12px] font-black text-pink-700 mb-0.5">맞벌이 부부 전용 모드</div>
-                <div className="text-[11px] font-medium text-pink-400 leading-snug">두 사람의 직장을 동시에 고려한 '중간 지점 최적화'. 어느 한 쪽도 희생하지 않는 입지를 찾아드립니다.</div>
-              </div>
-            </div>
-
-            {/* CTA */}
-            <button onClick={onClose} className="w-full bg-gray-900 hover:bg-black text-white font-black py-4 rounded-2xl text-[14px] flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-xl shadow-gray-200 mb-2">
-              <Search size={16} strokeWidth={3} /> 지금 바로 분석 시작하기
-            </button>
-
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function App() {
+  const isMobile = useIsMobile();
   const [mapCenter] = useState({ lat: 37.5665, lng: 126.9780 });
   const [zoomLevel] = useState(15);
   const [mode, setMode] = useState('single');
@@ -391,7 +43,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
   const [results, setResults] = useState(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [mobileSheetState, setMobileSheetState] = useState('peek'); // 'hidden', 'peek', 'full'
   const [expandedSpotIndex, setExpandedSpotIndex] = useState(null);
   const [expandedComplexIdx, setExpandedComplexIdx] = useState(0);
@@ -407,6 +59,11 @@ function App() {
   const mapContainerRef = useRef(null);
   const markersRef = useRef([]);
   const pathsRef = useRef([]);
+  const loadingTimerRef = useRef(null);
+  // 분석 응답을 기다리는 사이 창 크기나 화면 방향이 바뀔 수 있다. await 나 타이머 뒤에 실행되는 코드는
+  // 클로저에 잡힌 값이 아니라 실행 시점의 값을 읽어야 하므로 훅 값을 ref 로도 들고 있는다.
+  const isMobileRef = useRef(isMobile);
+  useEffect(() => { isMobileRef.current = isMobile; }, [isMobile]);
   const { map, isReady, error: mapError } = useMap(mapContainerRef, { center: mapCenter, zoom: zoomLevel });
 
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://search-house.onrender.com';
@@ -429,11 +86,24 @@ function App() {
 
   useEffect(() => { fetchStations(); }, [fetchStations]);
 
-  const getBudgetStatus = (ratio) => {
-    if (ratio <= 0.2) return { label: '양호', color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100', icon: '✅' };
-    if (ratio <= 0.3) return { label: '주의', color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100', icon: '⚠️' };
-    return { label: '위험', color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-100', icon: '🚨' };
-  };
+  const stopLoadingMessages = useCallback(() => {
+    if (loadingTimerRef.current === null) return;
+    clearInterval(loadingTimerRef.current);
+    loadingTimerRef.current = null;
+  }, []);
+
+  const startLoadingMessages = useCallback((messages) => {
+    stopLoadingMessages();
+    let index = 0;
+    setLoadingMessage(messages[0]);
+    loadingTimerRef.current = setInterval(() => {
+      index = (index + 1) % messages.length;
+      setLoadingMessage(messages[index]);
+    }, LOADING_MESSAGE_INTERVAL_MS);
+  }, [stopLoadingMessages]);
+
+  // 요청 도중 화면이 사라져도 타이머가 남아 상태를 갱신하지 않도록 한다.
+  useEffect(() => stopLoadingMessages, [stopLoadingMessages]);
 
   const drawCommutePaths = useCallback((spot, workplaceLocs, mode) => {
     if (!map) return;
@@ -452,12 +122,13 @@ function App() {
     }
     
     // 사이드바 영역을 고려한 패딩 적용 (데스크탑 460px)
-    const isDesktop = window.innerWidth >= 768;
-    const padding = { 
-      left: isDesktop ? 460 : 40, 
-      right: 40, 
-      top: 100, 
-      bottom: 100 
+    // 검색 직후에는 타이머 뒤에 호출되므로 실행 시점의 화면 크기를 읽는다.
+    const isDesktop = !isMobileRef.current;
+    const padding = {
+      left: isDesktop ? 460 : 40,
+      right: 40,
+      top: 100,
+      bottom: 100
     };
     setBounds(map, pts, padding);
   }, [map]);
@@ -468,24 +139,24 @@ function App() {
     setExpandedComplexIdx(0);
     if (!isAlreadyExpanded) {
       drawCommutePaths(spot, workplaceLocs, mode);
-      if (window.innerWidth < 768) setMobileSheetState('hidden');
+      if (isMobile) setMobileSheetState('hidden');
     } else {
       pathsRef.current.forEach(p => p.setMap(null));
       pathsRef.current = [];
       const allPts = [...results, workplaceLocs.user1];
       if (workplaceLocs.user2) allPts.push(workplaceLocs.user2);
-      
-      const isDesktop = window.innerWidth >= 768;
-      const padding = { 
-        left: isDesktop ? 460 : 40, 
-        right: 40, 
-        top: 100, 
-        bottom: 100 
+
+      const isDesktop = !isMobile;
+      const padding = {
+        left: isDesktop ? 460 : 40,
+        right: 40,
+        top: 100,
+        bottom: 100
       };
       setBounds(map, allPts, padding);
       setTimeout(() => { const currentZoom = getZoom(map); setZoom(map, currentZoom - 2); }, 300);
     }
-  }, [expandedSpotIndex, workplaceLocs, mode, drawCommutePaths, results, map]);
+  }, [expandedSpotIndex, workplaceLocs, mode, drawCommutePaths, results, map, isMobile]);
 
   useEffect(() => {
     if (!map || !isReady) return;
@@ -500,7 +171,7 @@ function App() {
             <div style="background:${isSelected ? '#3B82F6' : 'rgba(31,41,55,0.9)'}; backdrop-filter: blur(8px); color:white; padding: 8px 14px; border-radius: 40px; font-weight: 900; font-size: 13px; white-space: nowrap; border: 2.5px solid ${isSelected ? '#FACC15' : 'white'}; box-shadow: 0 12px 30px rgba(0,0,0,0.25); transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); ${isSelected ? 'transform: scale(1.1);' : ''}">
               <div style="display:flex; align-items:center; gap:6px;">
                 <span style="font-size: 14px;">${index === 0 ? '🏆' : (index+1)}</span>
-                <span style="letter-spacing: -0.02em;">${spot.name}</span>
+                <span style="letter-spacing: -0.02em;">${escapeHtml(spot.name)}</span>
               </div>
             </div>
             <div style="width: 3px; height: 10px; background: ${isSelected ? '#FACC15' : 'white'};"></div>
@@ -524,11 +195,13 @@ function App() {
 
   const usesCarRouting = inputs.user1.transport === 'car' || (mode === 'couple' && inputs.user2.transport === 'car');
 
+  const spotKeys = useMemo(() => buildUniqueKeys(results || [], (spot) => `${spot.name}|${spot.dong || ''}`), [results]);
+  const complexKeys = useMemo(() => (results || []).map((spot) => buildUniqueKeys(spot.complexes, (apt) => `${apt.name}|${apt.dong || ''}`)), [results]);
+
   const handleSearch = async () => {
     setSearchError(null);
     if (!inputs.user1.workplace) { setSearchError("나의 직장 위치를 선택해 주세요."); return; }
     if (mode === 'couple' && !inputs.user2.workplace) { setSearchError("커플 모드에서는 배우자의 직장 위치도 선택해 주세요."); return; }
-    const sleep = (ms) => new Promise(res => setTimeout(res, ms));
     setLoading(true);
     try {
       const loc1 = inputs.user1.workplace;
@@ -549,14 +222,21 @@ function App() {
         user2: loc2 ? { workplace: loc2, salary: inputs.user2.salary, transport: inputs.user2.transport } : null 
       };
 
-      setLoadingMessage("수도권 3만 개 단지 실거래 데이터 필터링 중..."); await sleep(800);
-      setLoadingMessage(`${inputs.user1.salary}만원 연봉 기반 최적 예산 구간 산출 완료`); await sleep(600);
-      setLoadingMessage("08:00 출근 피크 실시간 교통망 시뮬레이션 중...");
-      const fetchPromise = fetchWithTimeout(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 30000);
-      await sleep(1200); setLoadingMessage("기회비용 및 피로도 가중치 랭킹 산출 중...");
-      const response = await fetchPromise;
-      if (!response.ok) throw new Error(`분석 요청 실패 (HTTP ${response.status})`);
+      // 진행 문구는 안내일 뿐이라 요청을 늦추지 않는다. 요청은 바로 보내고 문구만 응답을 기다리는 동안 순환시킨다.
+      startLoadingMessages([
+        "수도권 3만 개 단지 실거래 데이터 필터링 중...",
+        `${inputs.user1.salary}만원 연봉 기반 최적 예산 구간 산출 완료`,
+        "08:00 출근 피크 실시간 교통망 시뮬레이션 중...",
+        "기회비용 및 피로도 가중치 랭킹 산출 중...",
+      ]);
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/optimize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 30000);
+      if (!response.ok) {
+        const error = new Error(`분석 요청 실패 (HTTP ${response.status})`);
+        error.status = response.status;
+        throw error;
+      }
       const data = await response.json();
+      stopLoadingMessages();
       if (!data || !Array.isArray(data.results)) throw new Error('INVALID_RESPONSE');
       setRealtimeRouting(typeof data.meta?.realtime_routing === 'boolean' ? data.meta.realtime_routing : null);
       setSearchedResidentType(data.meta?.resident_type || residentType);
@@ -567,11 +247,13 @@ function App() {
       setLoadingMessage("단지 위치 정밀 보정 중...");
       const geocodedResults = await Promise.all(
         validResults.map(async (spot) => {
+          // 서버가 이미 단지 좌표로 통근 시간을 계산했다면, 여기서 좌표를 바꾸는 순간 그 계산과 어긋난다.
+          if (spot.coord_precise === true) return spot;
           const dong = spot.complexes?.[0]?.dong || '';
           const query = `${dong} ${spot.name}`.trim();
           try {
             const coords = await geocodeAddress(query);
-            if (coords) {
+            if (coords && isWithinCorrectionRange(spot, coords)) {
               const nearby = findNearestStations(coords.lat, coords.lng, stationList);
               return {
                 ...spot,
@@ -585,18 +267,18 @@ function App() {
         })
       );
 
-      await sleep(300); setResults(geocodedResults);
+      setResults(geocodedResults);
       if (geocodedResults.length > 0) {
         setInputsCollapsed(true);
-        if (window.innerWidth < 768) setMobileSheetState('hidden');
+        if (isMobileRef.current) setMobileSheetState('hidden');
       } else {
-        if (window.innerWidth < 768) setMobileSheetState('full');
+        if (isMobileRef.current) setMobileSheetState('full');
       }
 
       if (geocodedResults.length > 0) {
         const allPts = [...geocodedResults, loc1];
         if (loc2) allPts.push(loc2);
-        const padding = { left: window.innerWidth >= 768 && isSidebarOpen ? 460 : 60, right: 60, top: 60, bottom: 60 };
+        const padding = { left: !isMobileRef.current && isSidebarOpen ? 460 : 60, right: 60, top: 60, bottom: 60 };
         setBounds(map, allPts, padding);
         setTimeout(() => { const currentZoom = getZoom(map); setZoom(map, currentZoom - 2); }, 300);
         setExpandedSpotIndex(0); setExpandedComplexIdx(0);
@@ -604,10 +286,8 @@ function App() {
       }
     } catch (err) {
       console.error(err);
-      setSearchError(err?.message === 'INVALID_RESPONSE'
-        ? '서버에서 올바르지 않은 응답을 받았습니다. 잠시 후 다시 시도해 주세요.'
-        : getRequestErrorMessage(err, '분석 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'));
-    } finally { setLoading(false); setLoadingMessage(""); }
+      setSearchError(getSearchErrorMessage(err));
+    } finally { stopLoadingMessages(); setLoading(false); setLoadingMessage(""); }
   };
 
   return (
@@ -651,7 +331,7 @@ function App() {
 
       <div className={`absolute z-[1000] transition-all duration-500 cubic-bezier(0.4, 0, 0.2, 1) flex flex-col 
         md:inset-y-0 md:left-0 md:w-[420px] md:bg-white md:border-r md:border-gray-100 md:shadow-[10px_0_30px_rgba(0,0,0,0.02)]
-        ${window.innerWidth < 768 
+        ${isMobile
           ? `inset-x-0 bottom-0 bg-white rounded-t-[2.5rem] shadow-[0_-20px_60px_rgba(0,0,0,0.12)] overflow-hidden 
              ${mobileSheetState === 'hidden' ? 'translate-y-full' : (mobileSheetState === 'peek' ? 'translate-y-[calc(100%-80px)]' : 'translate-y-0 h-[85vh]')}`
           : (isSidebarOpen ? 'translate-x-0' : '-translate-x-full')
@@ -674,7 +354,7 @@ function App() {
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => setShowHelp(true)} aria-label="사용 가이드 열기" className="p-2 bg-gray-100 rounded-full transition-colors hover:bg-blue-50 active:bg-blue-100" title="사용 가이드"><HelpCircle size={16} className="text-gray-400 hover:text-blue-500" /></button>
-                <button onClick={() => { if(window.innerWidth < 768) setMobileSheetState('hidden'); else setIsSidebarOpen(false); }} aria-label="검색 패널 닫기" className="p-2 bg-gray-100 rounded-full md:hidden transition-colors active:bg-gray-200"><X size={20} /></button>
+                <button onClick={() => { if(isMobile) setMobileSheetState('hidden'); else setIsSidebarOpen(false); }} aria-label="검색 패널 닫기" className="p-2 bg-gray-100 rounded-full md:hidden transition-colors active:bg-gray-200"><X size={20} /></button>
               </div>
             </div>
 
@@ -685,7 +365,7 @@ function App() {
                   <span className="text-[10px] font-black bg-gray-100 text-gray-500 px-2 py-1 rounded-full">{inputs.user1.salary}만</span>
                   <span className="text-[10px] font-black bg-gray-100 text-gray-500 px-2 py-1 rounded-full">주거비 {Math.round(housingRatio * 100)}%</span>
                 </div>
-                <button onClick={() => { setInputsCollapsed(false); if(window.innerWidth < 768) setMobileSheetState('full'); }} className="w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-[11px] font-black text-gray-500 flex items-center justify-center gap-1.5 transition-colors"><Settings2 size={13} /> 조건 수정</button>
+                <button onClick={() => { setInputsCollapsed(false); if(isMobile) setMobileSheetState('full'); }} className="w-full py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-[11px] font-black text-gray-500 flex items-center justify-center gap-1.5 transition-colors"><Settings2 size={13} /> 조건 수정</button>
               </div>
             ) : (
             <div className="space-y-3 md:space-y-4">
@@ -702,7 +382,7 @@ function App() {
               <div className="space-y-3">
                 <div className="space-y-1">
                   <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">직장 위치</div>
-                  <StationSearch stations={stationList} value={inputs.user1.workplace} onChange={(val) => setInputs({...inputs, user1: {...inputs.user1, workplace: val}})} placeholder="나의 직장 위치 검색" icon={MapPin} colorClass="text-blue-500" stationLoading={stationLoading} stationError={stationError} onRetry={fetchStations} />
+                  <StationSearch stations={stationList} value={inputs.user1.workplace} onChange={(val) => setInputs({...inputs, user1: {...inputs.user1, workplace: val}})} placeholder="나의 직장 위치 검색" icon={MapPin} iconFocusClass="group-focus-within:text-blue-500" stationLoading={stationLoading} stationError={stationError} onRetry={fetchStations} />
                 </div>
                 <div className="flex gap-2">
                   <div className="flex-1 space-y-1">
@@ -722,7 +402,7 @@ function App() {
                 <div className="space-y-3 pt-3 border-t border-gray-100 animate-in fade-in">
                   <div className="space-y-1">
                     <div className="text-[10px] font-black text-pink-400 uppercase tracking-widest pl-1">배우자 직장</div>
-                    <StationSearch stations={stationList} value={inputs.user2.workplace} onChange={(val) => setInputs({...inputs, user2: {...inputs.user2, workplace: val}})} placeholder="배우자 직장 위치" icon={MapPin} colorClass="text-pink-500" stationLoading={stationLoading} stationError={stationError} onRetry={fetchStations} />
+                    <StationSearch stations={stationList} value={inputs.user2.workplace} onChange={(val) => setInputs({...inputs, user2: {...inputs.user2, workplace: val}})} placeholder="배우자 직장 위치" icon={MapPin} iconFocusClass="group-focus-within:text-pink-500" stationLoading={stationLoading} stationError={stationError} onRetry={fetchStations} />
                   </div>
                   <div className="flex gap-2">
                     <div className="flex-1 space-y-1">
@@ -840,10 +520,10 @@ function App() {
                 {results.map((spot, i) => {
                   const topApt = spot.complexes[0];
                   const monthlyIncome = ((mode === 'couple' ? inputs.user1.salary + inputs.user2.salary : inputs.user1.salary) * 10000 / 12) / 10000;
-                  const actualRatio = topApt?.fixed_monthly_exp / monthlyIncome;
-                  const status = getBudgetStatus(actualRatio);
+                  const actualRatio = getIncomeRatio(topApt?.fixed_monthly_exp, monthlyIncome);
+                  const status = actualRatio === null ? null : getBudgetStatus(actualRatio);
                   return (
-                  <div key={i} className={`transition-all rounded-[1.5rem] border overflow-hidden ${expandedSpotIndex === i ? 'bg-white border-blue-200 shadow-xl ring-1 ring-blue-100' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
+                  <div key={spotKeys[i]} className={`transition-all rounded-[1.5rem] border overflow-hidden ${expandedSpotIndex === i ? 'bg-white border-blue-200 shadow-xl ring-1 ring-blue-100' : 'bg-white border-gray-100 hover:border-gray-200'}`}>
                     <button onClick={() => handleSpotClick(spot, i)} className="w-full p-4 pb-3 text-left">
                       <div className="flex justify-between items-start mb-3">
                         <div className="flex items-center space-x-3">
@@ -851,7 +531,7 @@ function App() {
                           <div><div className="text-[9px] font-black text-blue-500 uppercase tracking-tighter mb-0.5">{spot.nearest_stations?.length > 0 ? spot.nearest_stations.join(' / ') + ' 인근' : (spot.dong || spot.name) + ' 인근'}</div><h6 className="text-[14px] font-black tracking-tighter text-gray-900 leading-none truncate max-w-[180px]">{topApt?.name}</h6></div>
                         </div>
                         <div className="text-right shrink-0 ml-2">
-                          <div className={`text-[9px] font-black px-2 py-0.5 rounded-full ${status.bg} ${status.color} border ${status.border} mb-1 inline-block`}>소득의 {Math.round(actualRatio * 100)}% ({status.label})</div>
+                          {status && <div className={`text-[9px] font-black px-2 py-0.5 rounded-full ${status.bg} ${status.color} border ${status.border} mb-1 inline-block`}>소득의 {Math.round(actualRatio * 100)}% ({status.label})</div>}
                           <div className="text-[12px] font-black text-gray-700 tracking-tight">{topApt?.display_price_value}</div>
                           {topApt?.avg_area && <div className="text-[9px] font-bold text-gray-400 mt-0.5">{topApt.avg_area}㎡ (약 {Math.round(topApt.avg_area / 3.3058)}평)</div>}
                           {topApt?.loan_amount > 0 && (
@@ -909,7 +589,7 @@ function App() {
                           <div className="space-y-1.5 mb-3">
                             <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest px-1">같은 역세권 다른 단지</div>
                             {spot.complexes.map((apt, idx) => (
-                              <div key={idx} onClick={() => setExpandedComplexIdx(idx)} className={`p-2.5 rounded-xl border transition-all cursor-pointer ${expandedComplexIdx === idx ? 'bg-blue-50 border-blue-200' : 'bg-gray-50/50 border-transparent'}`}>
+                              <div key={complexKeys[i][idx]} onClick={() => setExpandedComplexIdx(idx)} className={`p-2.5 rounded-xl border transition-all cursor-pointer ${expandedComplexIdx === idx ? 'bg-blue-50 border-blue-200' : 'bg-gray-50/50 border-transparent'}`}>
                                 <div className="flex justify-between items-center gap-2">
                                   <div className="flex items-center space-x-1.5 overflow-hidden"><span className={`text-[12px] font-black tracking-tight truncate ${expandedComplexIdx === idx ? 'text-blue-700' : 'text-gray-700'}`}>{apt.name}</span><ExternalLink size={9} className="text-gray-300 shrink-0 hover:text-blue-500 transition-colors" onClick={(e) => { e.stopPropagation(); window.open(getNaverLandUrl(apt.name, apt.dong), '_blank'); }} /></div>
                                   <div className="text-right shrink-0"><span className="text-[10px] font-black text-blue-600">{apt.display_price_value}</span></div>
@@ -976,8 +656,8 @@ function App() {
             const topApt = spot.complexes[0];
             const isSelected = expandedSpotIndex === i;
             return (
-              <div 
-                key={i} 
+              <div
+                key={spotKeys[i]}
                 onClick={() => handleSpotClick(spot, i)}
                 className={`flex-none w-[85vw] snap-center bg-white/95 backdrop-blur-xl p-5 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.2)] border-2 transition-all duration-300
                   ${isSelected ? 'border-blue-500 scale-100' : 'border-transparent scale-[0.96] opacity-90'}
@@ -993,14 +673,24 @@ function App() {
                     <div className="text-[9px] font-black text-gray-300 uppercase mt-1">총 기회비용</div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                {/* 커플 모드는 배지가 하나 늘어 한 줄에 다 들어가지 않으므로 그때만 줄바꿈을 허용한다 */}
+                <div className={`flex items-center gap-2 ${mode === 'couple' ? 'flex-wrap' : ''}`}>
                   <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-black ${getTimeStatus(spot.commute_time_1).bg} ${getTimeStatus(spot.commute_time_1).color} border ${getTimeStatus(spot.commute_time_1).border}`}>
-                    <Bus size={12} /> {spot.commute_time_1}분 
+                    {inputs.user1.transport === 'car' ? <Car size={12} /> : <Bus size={12} />} {mode === 'couple' ? '나: ' : ''}{spot.commute_time_1}분
                     <span className="opacity-60 ml-1.5 pl-1.5 border-l border-gray-200 flex gap-1">
                       <span className="flex items-center gap-0.5"><ArrowUpRight size={8} /> {spot.commute_morning_1}</span>
                       <span className="flex items-center gap-0.5"><ArrowDownLeft size={8} /> {spot.commute_evening_1}</span>
                     </span>
                   </div>
+                  {mode === 'couple' && spot.commute_time_2 > 0 && (
+                    <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-black ${getTimeStatus(spot.commute_time_2).bg} ${getTimeStatus(spot.commute_time_2).color} border ${getTimeStatus(spot.commute_time_2).border}`}>
+                      {inputs.user2.transport === 'car' ? <Car size={12} /> : <Bus size={12} />} 짝: {spot.commute_time_2}분
+                      <span className="opacity-60 ml-1.5 pl-1.5 border-l border-gray-200 flex gap-1">
+                        <span className="flex items-center gap-0.5"><ArrowUpRight size={8} /> {spot.commute_morning_2}</span>
+                        <span className="flex items-center gap-0.5"><ArrowDownLeft size={8} /> {spot.commute_evening_2}</span>
+                      </span>
+                    </div>
+                  )}
                   <div className="bg-gray-50 px-2.5 py-1 rounded-lg text-[10px] font-black text-gray-500">지출 {topApt?.fixed_monthly_exp}만</div>
                   <div className="ml-auto flex items-center gap-1 text-blue-500 font-black text-[11px]">상세보기 <ChevronRight size={14} /></div>
                 </div>
